@@ -24,13 +24,9 @@ export function PreviewWindow({ clips, features, setFeatures, videoDuration = 0 
 
   const playerDuration = Math.max(1, Math.round(videoDuration * 30));
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Only allow dragging if captions exist
-    const hasCaptions = clips.some(c => c.ai_metadata?.['captions']?.status === 'completed');
-    if (hasCaptions) {
-      setIsDragging(true);
-      updatePosition(e);
-    }
+  const handleHandleMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevents clicking the player beneath
+    setIsDragging(true);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -52,8 +48,6 @@ export function PreviewWindow({ clips, features, setFeatures, videoDuration = 0 
     const relY = (e.clientY - rect.top) / rect.height;
 
     // Convert to our feature scale
-    // captionX: -50 to 50 (offset from center)
-    // captionY: 0 to 100 (from top)
     const newX = Math.round((relX - 0.5) * 100);
     const newY = Math.round(relY * 100);
 
@@ -64,6 +58,8 @@ export function PreviewWindow({ clips, features, setFeatures, videoDuration = 0 
     });
   };
 
+  const hasCaptions = clips.some(c => c.ai_metadata?.['captions']?.status === 'completed');
+
   return (
     <div className="preview-area">
       <div className="preview-bg-text">ALT·CUT</div>
@@ -71,11 +67,9 @@ export function PreviewWindow({ clips, features, setFeatures, videoDuration = 0 
       <div 
         className={`preview-player-wrap ${isDragging ? 'dragging' : ''}`}
         ref={containerRef}
-        onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        style={{ cursor: clips.some(c => c.ai_metadata?.['captions']?.status === 'completed') ? 'move' : 'default' }}
       >
         {clips.length > 0 ? (
           <>
@@ -94,35 +88,56 @@ export function PreviewWindow({ clips, features, setFeatures, videoDuration = 0 
               fps={30}
               style={{ 
                 width: '240px', 
-                height: '427px', 
-                pointerEvents: isDragging ? 'none' : 'auto' // Allow dragging through the player
+                height: '427px',
               }}
-              controls={!isDragging} // Hide controls while dragging for better UX
+              controls={!isDragging}
               autoPlay
               loop
             />
             
-            {/* Visual feedback box while dragging */}
-            {isDragging && (
-              <div style={{
-                position: 'absolute',
-                top: `${features?.captionY}%`,
-                left: `${50 + (features?.captionX || 0)}%`,
-                width: '80%',
-                height: '60px',
-                border: '2px solid #ffcc00',
-                borderRadius: '4px',
-                transform: 'translate(-50%, -50%)',
-                pointerEvents: 'none',
-                boxShadow: '0 0 15px rgba(255,204,0,0.4)',
-                zIndex: 10
-              }} />
+            {/* ── Invisible/Visual Handle Layer ───────────────── */}
+            {hasCaptions && (
+              <div 
+                onMouseDown={handleHandleMouseDown}
+                style={{
+                  position: 'absolute',
+                  top: `${features?.captionY}%`,
+                  left: `${50 + (features?.captionX || 0)}%`,
+                  width: '85%',
+                  height: '80px',
+                  border: isDragging ? '2px solid #ffcc00' : '1px dashed rgba(255,204,0,0.4)',
+                  borderRadius: '4px',
+                  transform: 'translate(-50%, -50%)',
+                  cursor: 'move',
+                  zIndex: 100,
+                  pointerEvents: 'auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: isDragging ? '0 0 15px rgba(255,204,0,0.4)' : 'none',
+                  backgroundColor: 'rgba(255,204,0,0.02)', // Tiny tint to help hit area
+                }}
+              >
+                {!isDragging && (
+                  <div style={{ 
+                    color: 'rgba(255,204,0,0.6)', 
+                    fontSize: '8px', 
+                    position: 'absolute', 
+                    top: '-15px', 
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    Drag to move text
+                  </div>
+                )}
+              </div>
             )}
 
             <div className="preview-badges">
               <span className="preview-badge">1080×1920</span>
               <span className="preview-badge">30 FPS</span>
-              {clips.some(c => c.ai_metadata?.['captions']?.status === 'completed') && (
+              {hasCaptions && (
                 <span className="preview-badge" style={{ borderColor: '#ffcc00', color: '#ffcc00' }}>📝 CC</span>
               )}
               {clips.some(c => c.ai_metadata?.['denoise']?.status === 'completed') && (
