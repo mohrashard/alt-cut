@@ -104,12 +104,14 @@ const ClipCaptions: React.FC<{
       style={{
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'flex-start', // Position from top
+        justifyContent: 'center',
         alignItems: 'center',
-        paddingTop: `${captionY}%`, // Vertical position
-        paddingLeft: captionX !== 0 ? `${50 + captionX}%` : '0', // Basic X offset handling
+        left: `${50 + captionX}%`,
+        top: `${captionY}%`,
+        width: '100%',
+        height: 'auto',
+        transform: 'translate(-50%, -50%)',
         pointerEvents: 'none',
-        transform: `translateX(${captionX}%)`, // Better X control
       }}
     >
       <div

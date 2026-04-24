@@ -190,6 +190,7 @@ function App() {
             <PreviewWindow
               clips={timelineClips}
               features={features}
+              setFeatures={setFeatures}
               videoDuration={videoDuration}
             />
 

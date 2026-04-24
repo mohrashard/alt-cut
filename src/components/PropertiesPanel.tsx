@@ -256,39 +256,6 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
               </div>
             )}
 
-            {/* ── Caption Position ─────────────────────── */}
-            <div>
-              <div className="panel-section-label">Caption Position</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                    <span>Horizontal Offset</span><span>{features.captionX}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-50"
-                    max="50"
-                    value={features.captionX}
-                    onChange={e => updateSelect('captionX', parseInt(e.target.value))}
-                    className="prop-range"
-                  />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                    <span>Vertical Position</span><span>{features.captionY}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="5"
-                    max="95"
-                    value={features.captionY}
-                    onChange={e => updateSelect('captionY', parseInt(e.target.value))}
-                    className="prop-range"
-                  />
-                </div>
-              </div>
-            </div>
-
             {/* ── Typography & Style ────────────────────── */}
             <div>
               <div className="panel-section-label">Typography & Style</div>
