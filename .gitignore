@@ -41,7 +41,8 @@ render_intent.txt
 captions_*.json
 denoise_*.mp4
 final_export.mp4
-raw_audio_temp.wav
+raw_audio*.wav
+*.wav
 
 # Environment
 .env
