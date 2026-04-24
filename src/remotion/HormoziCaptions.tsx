@@ -7,12 +7,16 @@ interface Props {
   clips: any[];
   fontFamily?: string;
   animationStyle?: string;
+  captionX?: number;
+  captionY?: number;
 }
 
 export const HormoziCaptions: React.FC<Props> = ({
   clips = [],
   fontFamily = 'Arial',
   animationStyle = 'hormozi',
+  captionX = 0,
+  captionY = 80,
 }) => {
   const { fps } = useVideoConfig();
 
@@ -40,6 +44,8 @@ export const HormoziCaptions: React.FC<Props> = ({
                       clipStartTime={clip.start_time}
                       fontFamily={fontFamily}
                       animationStyle={animationStyle}
+                      captionX={captionX}
+                      captionY={captionY}
                       fps={fps}
                     />
                   )}
@@ -68,8 +74,10 @@ const ClipCaptions: React.FC<{
   clipStartTime: number;
   fontFamily: string;
   animationStyle: string;
+  captionX: number;
+  captionY: number;
   fps: number;
-}> = ({ clip, clipStartTime, fontFamily, animationStyle, fps }) => {
+}> = ({ clip, clipStartTime, fontFamily, animationStyle, captionX, captionY, fps }) => {
   const frame = useCurrentFrame();
 
   let captionsData: CaptionData | null = null;
@@ -96,10 +104,12 @@ const ClipCaptions: React.FC<{
       style={{
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'flex-end',
+        justifyContent: 'flex-start', // Position from top
         alignItems: 'center',
-        paddingBottom: '12%',
+        paddingTop: `${captionY}%`, // Vertical position
+        paddingLeft: captionX !== 0 ? `${50 + captionX}%` : '0', // Basic X offset handling
         pointerEvents: 'none',
+        transform: `translateX(${captionX}%)`, // Better X control
       }}
     >
       <div

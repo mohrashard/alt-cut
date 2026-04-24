@@ -6,6 +6,8 @@ import * as db from '../lib/db';
 export interface AppFeatures {
   fontFamily: string;
   animationStyle: string;
+  captionX: number; // Percentage offset from center (0 = center)
+  captionY: number; // Percentage from top (0-100)
 }
 
 // Shape returned by the Rust run_ai_job command
@@ -38,7 +40,12 @@ function StatusBadge({ status }: { status?: string }) {
 }
 
 export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChange }: PropertiesProps) {
-  const [features, setFeatures] = useState<AppFeatures>({ fontFamily: 'Arial', animationStyle: 'hormozi' });
+  const [features, setFeatures] = useState<AppFeatures>({
+    fontFamily: 'Arial',
+    animationStyle: 'hormozi',
+    captionX: 0,
+    captionY: 80, // Default to bottom area
+  });
   const [log, setLog] = useState<string>('');
 
   useEffect(() => { onFeaturesChange(features); }, [features, onFeaturesChange]);
@@ -46,7 +53,7 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
   // Reset log when clip changes
   useEffect(() => { setLog(''); }, [selectedClip?.id]);
 
-  const updateSelect = (key: keyof AppFeatures, value: string) =>
+  const updateSelect = (key: keyof AppFeatures, value: any) =>
     setFeatures(prev => ({ ...prev, [key]: value }));
 
   // ──────────────────────────────────────────────────────────
@@ -248,6 +255,39 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
                 </pre>
               </div>
             )}
+
+            {/* ── Caption Position ─────────────────────── */}
+            <div>
+              <div className="panel-section-label">Caption Position</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                    <span>Horizontal Offset</span><span>{features.captionX}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-50"
+                    max="50"
+                    value={features.captionX}
+                    onChange={e => updateSelect('captionX', parseInt(e.target.value))}
+                    className="prop-range"
+                  />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                    <span>Vertical Position</span><span>{features.captionY}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="5"
+                    max="95"
+                    value={features.captionY}
+                    onChange={e => updateSelect('captionY', parseInt(e.target.value))}
+                    className="prop-range"
+                  />
+                </div>
+              </div>
+            </div>
 
             {/* ── Typography & Style ────────────────────── */}
             <div>

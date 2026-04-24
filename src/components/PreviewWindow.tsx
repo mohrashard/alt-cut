@@ -32,6 +32,8 @@ export function PreviewWindow({ clips, features, videoDuration = 0 }: PreviewWin
                 clips: previewClips,
                 fontFamily: features?.fontFamily,
                 animationStyle: features?.animationStyle,
+                captionX: features?.captionX,
+                captionY: features?.captionY,
               }}
               durationInFrames={playerDuration}
               compositionWidth={1080}
