@@ -1,0 +1,48 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tauri
+src-tauri/target
+src-tauri/gen
+
+# Python
+backend_env/
+ai_backend/venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints
+
+# Application Data
+*.db
+*.db-journal
+render_intent.txt
+captions_*.json
+denoise_*.mp4
+final_export.mp4
+raw_audio_temp.wav
+
+# Environment
+.env
+.env.local

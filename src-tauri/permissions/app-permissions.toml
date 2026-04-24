@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-app-commands"
+description = "Allow application-specific commands"
+commands.allow = ["greet", "run_render_pipeline", "run_pipeline", "load_captions_file", "get_processed_path", "run_ai_job", "get_video_duration", "update_asset_path"]
+
+[[permission]]
+identifier = "allow-media-access"
+description = "Allow reading media files from common locations"
+[[permission.scope.allow]]
+path = "$HOME/**"
+[[permission.scope.allow]]
+path = "$DOWNLOADS/**"
+[[permission.scope.allow]]
+path = "**/*.mp4"

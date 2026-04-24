@@ -1,0 +1,1658 @@
+{
+    "chunks": [
+        {
+            "text": "This is the",
+            "start": 0.0,
+            "end": 0.38,
+            "words": [
+                {
+                    "word": "This",
+                    "start": 0.0,
+                    "end": 0.16
+                },
+                {
+                    "word": "is",
+                    "start": 0.16,
+                    "end": 0.26
+                },
+                {
+                    "word": "the",
+                    "start": 0.26,
+                    "end": 0.38
+                }
+            ]
+        },
+        {
+            "text": "most oversimplified video",
+            "start": 0.38,
+            "end": 1.7,
+            "words": [
+                {
+                    "word": "most",
+                    "start": 0.38,
+                    "end": 0.54
+                },
+                {
+                    "word": "oversimplified",
+                    "start": 0.54,
+                    "end": 1.34
+                },
+                {
+                    "word": "video",
+                    "start": 1.34,
+                    "end": 1.7
+                }
+            ]
+        },
+        {
+            "text": "on content strategy.",
+            "start": 1.7,
+            "end": 2.66,
+            "words": [
+                {
+                    "word": "on",
+                    "start": 1.7,
+                    "end": 1.84
+                },
+                {
+                    "word": "content",
+                    "start": 1.84,
+                    "end": 2.16
+                },
+                {
+                    "word": "strategy.",
+                    "start": 2.16,
+                    "end": 2.66
+                }
+            ]
+        },
+        {
+            "text": "A lot of",
+            "start": 2.66,
+            "end": 3.12,
+            "words": [
+                {
+                    "word": "A",
+                    "start": 2.66,
+                    "end": 2.78
+                },
+                {
+                    "word": "lot",
+                    "start": 2.78,
+                    "end": 2.96
+                },
+                {
+                    "word": "of",
+                    "start": 2.96,
+                    "end": 3.12
+                }
+            ]
+        },
+        {
+            "text": "your content is",
+            "start": 3.12,
+            "end": 4.22,
+            "words": [
+                {
+                    "word": "your",
+                    "start": 3.12,
+                    "end": 3.3
+                },
+                {
+                    "word": "content",
+                    "start": 3.3,
+                    "end": 3.72
+                },
+                {
+                    "word": "is",
+                    "start": 3.72,
+                    "end": 4.22
+                }
+            ]
+        },
+        {
+            "text": "random. One day",
+            "start": 4.22,
+            "end": 5.36,
+            "words": [
+                {
+                    "word": "random.",
+                    "start": 4.22,
+                    "end": 4.76
+                },
+                {
+                    "word": "One",
+                    "start": 4.76,
+                    "end": 5.1
+                },
+                {
+                    "word": "day",
+                    "start": 5.1,
+                    "end": 5.36
+                }
+            ]
+        },
+        {
+            "text": "you post a tip,",
+            "start": 5.36,
+            "end": 6.36,
+            "words": [
+                {
+                    "word": "you",
+                    "start": 5.36,
+                    "end": 5.58
+                },
+                {
+                    "word": "post",
+                    "start": 5.58,
+                    "end": 5.9
+                },
+                {
+                    "word": "a",
+                    "start": 5.9,
+                    "end": 6.1
+                },
+                {
+                    "word": "tip,",
+                    "start": 6.1,
+                    "end": 6.36
+                }
+            ]
+        },
+        {
+            "text": "the next day",
+            "start": 6.52,
+            "end": 7.2,
+            "words": [
+                {
+                    "word": "the",
+                    "start": 6.52,
+                    "end": 6.7
+                },
+                {
+                    "word": "next",
+                    "start": 6.7,
+                    "end": 6.9
+                },
+                {
+                    "word": "day",
+                    "start": 6.9,
+                    "end": 7.2
+                }
+            ]
+        },
+        {
+            "text": "it's a trend,",
+            "start": 7.2,
+            "end": 8.0,
+            "words": [
+                {
+                    "word": "it's",
+                    "start": 7.2,
+                    "end": 7.58
+                },
+                {
+                    "word": "a",
+                    "start": 7.58,
+                    "end": 7.68
+                },
+                {
+                    "word": "trend,",
+                    "start": 7.68,
+                    "end": 8.0
+                }
+            ]
+        },
+        {
+            "text": "then a talking",
+            "start": 8.0,
+            "end": 8.74,
+            "words": [
+                {
+                    "word": "then",
+                    "start": 8.0,
+                    "end": 8.22
+                },
+                {
+                    "word": "a",
+                    "start": 8.22,
+                    "end": 8.46
+                },
+                {
+                    "word": "talking",
+                    "start": 8.46,
+                    "end": 8.74
+                }
+            ]
+        },
+        {
+            "text": "head video and",
+            "start": 8.74,
+            "end": 9.84,
+            "words": [
+                {
+                    "word": "head",
+                    "start": 8.74,
+                    "end": 9.06
+                },
+                {
+                    "word": "video",
+                    "start": 9.06,
+                    "end": 9.48
+                },
+                {
+                    "word": "and",
+                    "start": 9.48,
+                    "end": 9.84
+                }
+            ]
+        },
+        {
+            "text": "you're hoping that",
+            "start": 9.84,
+            "end": 10.56,
+            "words": [
+                {
+                    "word": "you're",
+                    "start": 9.84,
+                    "end": 10.12
+                },
+                {
+                    "word": "hoping",
+                    "start": 10.12,
+                    "end": 10.38
+                },
+                {
+                    "word": "that",
+                    "start": 10.38,
+                    "end": 10.56
+                }
+            ]
+        },
+        {
+            "text": "something moves the",
+            "start": 10.56,
+            "end": 11.7,
+            "words": [
+                {
+                    "word": "something",
+                    "start": 10.56,
+                    "end": 10.84
+                },
+                {
+                    "word": "moves",
+                    "start": 10.84,
+                    "end": 11.48
+                },
+                {
+                    "word": "the",
+                    "start": 11.48,
+                    "end": 11.7
+                }
+            ]
+        },
+        {
+            "text": "needle forward but",
+            "start": 11.7,
+            "end": 12.6,
+            "words": [
+                {
+                    "word": "needle",
+                    "start": 11.7,
+                    "end": 11.88
+                },
+                {
+                    "word": "forward",
+                    "start": 11.88,
+                    "end": 12.3
+                },
+                {
+                    "word": "but",
+                    "start": 12.3,
+                    "end": 12.6
+                }
+            ]
+        },
+        {
+            "text": "nothing actually connects.",
+            "start": 12.6,
+            "end": 13.58,
+            "words": [
+                {
+                    "word": "nothing",
+                    "start": 12.6,
+                    "end": 12.88
+                },
+                {
+                    "word": "actually",
+                    "start": 12.88,
+                    "end": 13.2
+                },
+                {
+                    "word": "connects.",
+                    "start": 13.2,
+                    "end": 13.58
+                }
+            ]
+        },
+        {
+            "text": "That's because there's",
+            "start": 13.58,
+            "end": 14.38,
+            "words": [
+                {
+                    "word": "That's",
+                    "start": 13.58,
+                    "end": 13.76
+                },
+                {
+                    "word": "because",
+                    "start": 13.76,
+                    "end": 14.0
+                },
+                {
+                    "word": "there's",
+                    "start": 14.0,
+                    "end": 14.38
+                }
+            ]
+        },
+        {
+            "text": "no structure behind",
+            "start": 14.38,
+            "end": 15.7,
+            "words": [
+                {
+                    "word": "no",
+                    "start": 14.38,
+                    "end": 14.66
+                },
+                {
+                    "word": "structure",
+                    "start": 14.66,
+                    "end": 15.24
+                },
+                {
+                    "word": "behind",
+                    "start": 15.24,
+                    "end": 15.7
+                }
+            ]
+        },
+        {
+            "text": "it. So here's what",
+            "start": 15.7,
+            "end": 16.96,
+            "words": [
+                {
+                    "word": "it.",
+                    "start": 15.7,
+                    "end": 16.06
+                },
+                {
+                    "word": "So",
+                    "start": 16.06,
+                    "end": 16.3
+                },
+                {
+                    "word": "here's",
+                    "start": 16.3,
+                    "end": 16.78
+                },
+                {
+                    "word": "what",
+                    "start": 16.78,
+                    "end": 16.96
+                }
+            ]
+        },
+        {
+            "text": "actually is the",
+            "start": 16.96,
+            "end": 17.96,
+            "words": [
+                {
+                    "word": "actually",
+                    "start": 16.96,
+                    "end": 17.44
+                },
+                {
+                    "word": "is",
+                    "start": 17.44,
+                    "end": 17.84
+                },
+                {
+                    "word": "the",
+                    "start": 17.84,
+                    "end": 17.96
+                }
+            ]
+        },
+        {
+            "text": "simplest way to",
+            "start": 17.96,
+            "end": 18.9,
+            "words": [
+                {
+                    "word": "simplest",
+                    "start": 17.96,
+                    "end": 18.24
+                },
+                {
+                    "word": "way",
+                    "start": 18.24,
+                    "end": 18.6
+                },
+                {
+                    "word": "to",
+                    "start": 18.6,
+                    "end": 18.9
+                }
+            ]
+        },
+        {
+            "text": "think about it.",
+            "start": 18.9,
+            "end": 19.62,
+            "words": [
+                {
+                    "word": "think",
+                    "start": 18.9,
+                    "end": 19.2
+                },
+                {
+                    "word": "about",
+                    "start": 19.2,
+                    "end": 19.44
+                },
+                {
+                    "word": "it.",
+                    "start": 19.44,
+                    "end": 19.62
+                }
+            ]
+        },
+        {
+            "text": "There's three types",
+            "start": 19.62,
+            "end": 20.32,
+            "words": [
+                {
+                    "word": "There's",
+                    "start": 19.62,
+                    "end": 19.86
+                },
+                {
+                    "word": "three",
+                    "start": 19.86,
+                    "end": 20.1
+                },
+                {
+                    "word": "types",
+                    "start": 20.1,
+                    "end": 20.32
+                }
+            ]
+        },
+        {
+            "text": "of content. That is",
+            "start": 20.32,
+            "end": 21.28,
+            "words": [
+                {
+                    "word": "of",
+                    "start": 20.32,
+                    "end": 20.44
+                },
+                {
+                    "word": "content.",
+                    "start": 20.44,
+                    "end": 20.82
+                },
+                {
+                    "word": "That",
+                    "start": 20.82,
+                    "end": 20.98
+                },
+                {
+                    "word": "is",
+                    "start": 20.98,
+                    "end": 21.28
+                }
+            ]
+        },
+        {
+            "text": "awareness content. This",
+            "start": 21.28,
+            "end": 22.28,
+            "words": [
+                {
+                    "word": "awareness",
+                    "start": 21.28,
+                    "end": 21.7
+                },
+                {
+                    "word": "content.",
+                    "start": 21.7,
+                    "end": 22.16
+                },
+                {
+                    "word": "This",
+                    "start": 22.16,
+                    "end": 22.28
+                }
+            ]
+        },
+        {
+            "text": "is where the content",
+            "start": 22.28,
+            "end": 23.16,
+            "words": [
+                {
+                    "word": "is",
+                    "start": 22.28,
+                    "end": 22.4
+                },
+                {
+                    "word": "where",
+                    "start": 22.4,
+                    "end": 22.64
+                },
+                {
+                    "word": "the",
+                    "start": 22.64,
+                    "end": 22.82
+                },
+                {
+                    "word": "content",
+                    "start": 22.82,
+                    "end": 23.16
+                }
+            ]
+        },
+        {
+            "text": "that actually fools",
+            "start": 23.16,
+            "end": 23.86,
+            "words": [
+                {
+                    "word": "that",
+                    "start": 23.16,
+                    "end": 23.34
+                },
+                {
+                    "word": "actually",
+                    "start": 23.34,
+                    "end": 23.56
+                },
+                {
+                    "word": "fools",
+                    "start": 23.56,
+                    "end": 23.86
+                }
+            ]
+        },
+        {
+            "text": "you in. It involves",
+            "start": 23.86,
+            "end": 24.88,
+            "words": [
+                {
+                    "word": "you",
+                    "start": 23.86,
+                    "end": 24.14
+                },
+                {
+                    "word": "in.",
+                    "start": 24.14,
+                    "end": 24.46
+                },
+                {
+                    "word": "It",
+                    "start": 24.46,
+                    "end": 24.56
+                },
+                {
+                    "word": "involves",
+                    "start": 24.56,
+                    "end": 24.88
+                }
+            ]
+        },
+        {
+            "text": "trends, simple concepts",
+            "start": 24.88,
+            "end": 26.46,
+            "words": [
+                {
+                    "word": "trends,",
+                    "start": 24.88,
+                    "end": 25.46
+                },
+                {
+                    "word": "simple",
+                    "start": 25.66,
+                    "end": 25.94
+                },
+                {
+                    "word": "concepts",
+                    "start": 25.94,
+                    "end": 26.46
+                }
+            ]
+        },
+        {
+            "text": "that anyone can",
+            "start": 26.46,
+            "end": 27.16,
+            "words": [
+                {
+                    "word": "that",
+                    "start": 26.46,
+                    "end": 26.74
+                },
+                {
+                    "word": "anyone",
+                    "start": 26.74,
+                    "end": 26.96
+                },
+                {
+                    "word": "can",
+                    "start": 26.96,
+                    "end": 27.16
+                }
+            ]
+        },
+        {
+            "text": "understand. Even if",
+            "start": 27.16,
+            "end": 28.14,
+            "words": [
+                {
+                    "word": "understand.",
+                    "start": 27.16,
+                    "end": 27.62
+                },
+                {
+                    "word": "Even",
+                    "start": 27.62,
+                    "end": 27.98
+                },
+                {
+                    "word": "if",
+                    "start": 27.98,
+                    "end": 28.14
+                }
+            ]
+        },
+        {
+            "text": "they are not",
+            "start": 28.14,
+            "end": 28.7,
+            "words": [
+                {
+                    "word": "they",
+                    "start": 28.14,
+                    "end": 28.34
+                },
+                {
+                    "word": "are",
+                    "start": 28.34,
+                    "end": 28.44
+                },
+                {
+                    "word": "not",
+                    "start": 28.44,
+                    "end": 28.7
+                }
+            ]
+        },
+        {
+            "text": "deep into your",
+            "start": 28.7,
+            "end": 29.46,
+            "words": [
+                {
+                    "word": "deep",
+                    "start": 28.7,
+                    "end": 29.04
+                },
+                {
+                    "word": "into",
+                    "start": 29.04,
+                    "end": 29.3
+                },
+                {
+                    "word": "your",
+                    "start": 29.3,
+                    "end": 29.46
+                }
+            ]
+        },
+        {
+            "text": "niche yet. The goal",
+            "start": 29.46,
+            "end": 30.32,
+            "words": [
+                {
+                    "word": "niche",
+                    "start": 29.46,
+                    "end": 29.68
+                },
+                {
+                    "word": "yet.",
+                    "start": 29.68,
+                    "end": 29.98
+                },
+                {
+                    "word": "The",
+                    "start": 29.98,
+                    "end": 30.14
+                },
+                {
+                    "word": "goal",
+                    "start": 30.14,
+                    "end": 30.32
+                }
+            ]
+        },
+        {
+            "text": "here is just",
+            "start": 30.32,
+            "end": 31.34,
+            "words": [
+                {
+                    "word": "here",
+                    "start": 30.32,
+                    "end": 30.54
+                },
+                {
+                    "word": "is",
+                    "start": 30.54,
+                    "end": 30.84
+                },
+                {
+                    "word": "just",
+                    "start": 30.84,
+                    "end": 31.34
+                }
+            ]
+        },
+        {
+            "text": "reach. Now once",
+            "start": 31.34,
+            "end": 31.96,
+            "words": [
+                {
+                    "word": "reach.",
+                    "start": 31.34,
+                    "end": 31.68
+                },
+                {
+                    "word": "Now",
+                    "start": 31.68,
+                    "end": 31.76
+                },
+                {
+                    "word": "once",
+                    "start": 31.76,
+                    "end": 31.96
+                }
+            ]
+        },
+        {
+            "text": "people find you,",
+            "start": 31.96,
+            "end": 32.68,
+            "words": [
+                {
+                    "word": "people",
+                    "start": 31.96,
+                    "end": 32.2
+                },
+                {
+                    "word": "find",
+                    "start": 32.2,
+                    "end": 32.5
+                },
+                {
+                    "word": "you,",
+                    "start": 32.5,
+                    "end": 32.68
+                }
+            ]
+        },
+        {
+            "text": "then this matters.",
+            "start": 32.82,
+            "end": 33.6,
+            "words": [
+                {
+                    "word": "then",
+                    "start": 32.82,
+                    "end": 32.98
+                },
+                {
+                    "word": "this",
+                    "start": 32.98,
+                    "end": 33.28
+                },
+                {
+                    "word": "matters.",
+                    "start": 33.28,
+                    "end": 33.6
+                }
+            ]
+        },
+        {
+            "text": "Trust content. This",
+            "start": 33.6,
+            "end": 34.58,
+            "words": [
+                {
+                    "word": "Trust",
+                    "start": 33.6,
+                    "end": 33.88
+                },
+                {
+                    "word": "content.",
+                    "start": 33.88,
+                    "end": 34.42
+                },
+                {
+                    "word": "This",
+                    "start": 34.42,
+                    "end": 34.58
+                }
+            ]
+        },
+        {
+            "text": "is where you go",
+            "start": 34.58,
+            "end": 35.5,
+            "words": [
+                {
+                    "word": "is",
+                    "start": 34.58,
+                    "end": 34.7
+                },
+                {
+                    "word": "where",
+                    "start": 34.7,
+                    "end": 34.94
+                },
+                {
+                    "word": "you",
+                    "start": 34.94,
+                    "end": 35.2
+                },
+                {
+                    "word": "go",
+                    "start": 35.2,
+                    "end": 35.5
+                }
+            ]
+        },
+        {
+            "text": "deeper and you",
+            "start": 35.5,
+            "end": 36.7,
+            "words": [
+                {
+                    "word": "deeper",
+                    "start": 35.5,
+                    "end": 36.06
+                },
+                {
+                    "word": "and",
+                    "start": 36.06,
+                    "end": 36.58
+                },
+                {
+                    "word": "you",
+                    "start": 36.58,
+                    "end": 36.7
+                }
+            ]
+        },
+        {
+            "text": "break down things",
+            "start": 36.7,
+            "end": 37.42,
+            "words": [
+                {
+                    "word": "break",
+                    "start": 36.7,
+                    "end": 36.9
+                },
+                {
+                    "word": "down",
+                    "start": 36.9,
+                    "end": 37.14
+                },
+                {
+                    "word": "things",
+                    "start": 37.14,
+                    "end": 37.42
+                }
+            ]
+        },
+        {
+            "text": "like sharing step",
+            "start": 37.42,
+            "end": 38.38,
+            "words": [
+                {
+                    "word": "like",
+                    "start": 37.42,
+                    "end": 37.72
+                },
+                {
+                    "word": "sharing",
+                    "start": 37.72,
+                    "end": 38.08
+                },
+                {
+                    "word": "step",
+                    "start": 38.08,
+                    "end": 38.38
+                }
+            ]
+        },
+        {
+            "text": "by step tutorials,",
+            "start": 38.38,
+            "end": 39.4,
+            "words": [
+                {
+                    "word": "by",
+                    "start": 38.38,
+                    "end": 38.54
+                },
+                {
+                    "word": "step",
+                    "start": 38.54,
+                    "end": 38.88
+                },
+                {
+                    "word": "tutorials,",
+                    "start": 38.88,
+                    "end": 39.4
+                }
+            ]
+        },
+        {
+            "text": "explaining things that",
+            "start": 39.4,
+            "end": 40.56,
+            "words": [
+                {
+                    "word": "explaining",
+                    "start": 39.4,
+                    "end": 39.88
+                },
+                {
+                    "word": "things",
+                    "start": 39.88,
+                    "end": 40.3
+                },
+                {
+                    "word": "that",
+                    "start": 40.3,
+                    "end": 40.56
+                }
+            ]
+        },
+        {
+            "text": "most people in",
+            "start": 40.56,
+            "end": 41.2,
+            "words": [
+                {
+                    "word": "most",
+                    "start": 40.56,
+                    "end": 40.76
+                },
+                {
+                    "word": "people",
+                    "start": 40.76,
+                    "end": 41.04
+                },
+                {
+                    "word": "in",
+                    "start": 41.04,
+                    "end": 41.2
+                }
+            ]
+        },
+        {
+            "text": "your niche only",
+            "start": 41.2,
+            "end": 41.82,
+            "words": [
+                {
+                    "word": "your",
+                    "start": 41.2,
+                    "end": 41.32
+                },
+                {
+                    "word": "niche",
+                    "start": 41.32,
+                    "end": 41.58
+                },
+                {
+                    "word": "only",
+                    "start": 41.58,
+                    "end": 41.82
+                }
+            ]
+        },
+        {
+            "text": "talk about in",
+            "start": 41.82,
+            "end": 42.6,
+            "words": [
+                {
+                    "word": "talk",
+                    "start": 41.82,
+                    "end": 42.12
+                },
+                {
+                    "word": "about",
+                    "start": 42.12,
+                    "end": 42.38
+                },
+                {
+                    "word": "in",
+                    "start": 42.38,
+                    "end": 42.6
+                }
+            ]
+        },
+        {
+            "text": "like surface level.",
+            "start": 42.6,
+            "end": 43.74,
+            "words": [
+                {
+                    "word": "like",
+                    "start": 42.6,
+                    "end": 42.76
+                },
+                {
+                    "word": "surface",
+                    "start": 42.76,
+                    "end": 43.26
+                },
+                {
+                    "word": "level.",
+                    "start": 43.26,
+                    "end": 43.74
+                }
+            ]
+        },
+        {
+            "text": "This is where people",
+            "start": 43.74,
+            "end": 44.46,
+            "words": [
+                {
+                    "word": "This",
+                    "start": 43.74,
+                    "end": 43.88
+                },
+                {
+                    "word": "is",
+                    "start": 43.88,
+                    "end": 44.0
+                },
+                {
+                    "word": "where",
+                    "start": 44.0,
+                    "end": 44.14
+                },
+                {
+                    "word": "people",
+                    "start": 44.14,
+                    "end": 44.46
+                }
+            ]
+        },
+        {
+            "text": "start thinking, okay,",
+            "start": 44.46,
+            "end": 45.46,
+            "words": [
+                {
+                    "word": "start",
+                    "start": 44.46,
+                    "end": 44.88
+                },
+                {
+                    "word": "thinking,",
+                    "start": 44.88,
+                    "end": 45.18
+                },
+                {
+                    "word": "okay,",
+                    "start": 45.18,
+                    "end": 45.46
+                }
+            ]
+        },
+        {
+            "text": "this person actually",
+            "start": 45.78,
+            "end": 46.8,
+            "words": [
+                {
+                    "word": "this",
+                    "start": 45.78,
+                    "end": 46.04
+                },
+                {
+                    "word": "person",
+                    "start": 46.04,
+                    "end": 46.42
+                },
+                {
+                    "word": "actually",
+                    "start": 46.42,
+                    "end": 46.8
+                }
+            ]
+        },
+        {
+            "text": "knows what they're",
+            "start": 46.8,
+            "end": 47.64,
+            "words": [
+                {
+                    "word": "knows",
+                    "start": 46.8,
+                    "end": 47.18
+                },
+                {
+                    "word": "what",
+                    "start": 47.18,
+                    "end": 47.46
+                },
+                {
+                    "word": "they're",
+                    "start": 47.46,
+                    "end": 47.64
+                }
+            ]
+        },
+        {
+            "text": "talking about. And",
+            "start": 47.64,
+            "end": 48.38,
+            "words": [
+                {
+                    "word": "talking",
+                    "start": 47.64,
+                    "end": 47.94
+                },
+                {
+                    "word": "about.",
+                    "start": 47.94,
+                    "end": 48.26
+                },
+                {
+                    "word": "And",
+                    "start": 48.26,
+                    "end": 48.38
+                }
+            ]
+        },
+        {
+            "text": "then comes the",
+            "start": 48.38,
+            "end": 49.02,
+            "words": [
+                {
+                    "word": "then",
+                    "start": 48.38,
+                    "end": 48.52
+                },
+                {
+                    "word": "comes",
+                    "start": 48.52,
+                    "end": 48.84
+                },
+                {
+                    "word": "the",
+                    "start": 48.84,
+                    "end": 49.02
+                }
+            ]
+        },
+        {
+            "text": "content that actually",
+            "start": 49.02,
+            "end": 50.02,
+            "words": [
+                {
+                    "word": "content",
+                    "start": 49.02,
+                    "end": 49.3
+                },
+                {
+                    "word": "that",
+                    "start": 49.3,
+                    "end": 49.54
+                },
+                {
+                    "word": "actually",
+                    "start": 49.54,
+                    "end": 50.02
+                }
+            ]
+        },
+        {
+            "text": "drives clients, which",
+            "start": 50.02,
+            "end": 50.92,
+            "words": [
+                {
+                    "word": "drives",
+                    "start": 50.02,
+                    "end": 50.36
+                },
+                {
+                    "word": "clients,",
+                    "start": 50.36,
+                    "end": 50.74
+                },
+                {
+                    "word": "which",
+                    "start": 50.74,
+                    "end": 50.92
+                }
+            ]
+        },
+        {
+            "text": "is proof content.",
+            "start": 50.92,
+            "end": 51.72,
+            "words": [
+                {
+                    "word": "is",
+                    "start": 50.92,
+                    "end": 51.08
+                },
+                {
+                    "word": "proof",
+                    "start": 51.08,
+                    "end": 51.32
+                },
+                {
+                    "word": "content.",
+                    "start": 51.32,
+                    "end": 51.72
+                }
+            ]
+        },
+        {
+            "text": "Think client wins,",
+            "start": 51.72,
+            "end": 52.66,
+            "words": [
+                {
+                    "word": "Think",
+                    "start": 51.72,
+                    "end": 51.9
+                },
+                {
+                    "word": "client",
+                    "start": 51.9,
+                    "end": 52.24
+                },
+                {
+                    "word": "wins,",
+                    "start": 52.24,
+                    "end": 52.66
+                }
+            ]
+        },
+        {
+            "text": "testimonials, posting stories",
+            "start": 52.92,
+            "end": 54.74,
+            "words": [
+                {
+                    "word": "testimonials,",
+                    "start": 52.92,
+                    "end": 53.82
+                },
+                {
+                    "word": "posting",
+                    "start": 53.82,
+                    "end": 54.28
+                },
+                {
+                    "word": "stories",
+                    "start": 54.28,
+                    "end": 54.74
+                }
+            ]
+        },
+        {
+            "text": "that show results from",
+            "start": 54.74,
+            "end": 55.88,
+            "words": [
+                {
+                    "word": "that",
+                    "start": 54.74,
+                    "end": 54.96
+                },
+                {
+                    "word": "show",
+                    "start": 54.96,
+                    "end": 55.12
+                },
+                {
+                    "word": "results",
+                    "start": 55.12,
+                    "end": 55.68
+                },
+                {
+                    "word": "from",
+                    "start": 55.68,
+                    "end": 55.88
+                }
+            ]
+        },
+        {
+            "text": "people that you've",
+            "start": 55.88,
+            "end": 56.6,
+            "words": [
+                {
+                    "word": "people",
+                    "start": 55.88,
+                    "end": 56.14
+                },
+                {
+                    "word": "that",
+                    "start": 56.14,
+                    "end": 56.34
+                },
+                {
+                    "word": "you've",
+                    "start": 56.34,
+                    "end": 56.6
+                }
+            ]
+        },
+        {
+            "text": "worked with. This is",
+            "start": 56.6,
+            "end": 57.26,
+            "words": [
+                {
+                    "word": "worked",
+                    "start": 56.6,
+                    "end": 56.82
+                },
+                {
+                    "word": "with.",
+                    "start": 56.82,
+                    "end": 57.1
+                },
+                {
+                    "word": "This",
+                    "start": 57.1,
+                    "end": 57.18
+                },
+                {
+                    "word": "is",
+                    "start": 57.18,
+                    "end": 57.26
+                }
+            ]
+        },
+        {
+            "text": "the content that makes",
+            "start": 57.26,
+            "end": 58.14,
+            "words": [
+                {
+                    "word": "the",
+                    "start": 57.26,
+                    "end": 57.34
+                },
+                {
+                    "word": "content",
+                    "start": 57.34,
+                    "end": 57.64
+                },
+                {
+                    "word": "that",
+                    "start": 57.64,
+                    "end": 57.9
+                },
+                {
+                    "word": "makes",
+                    "start": 57.9,
+                    "end": 58.14
+                }
+            ]
+        },
+        {
+            "text": "people think like,",
+            "start": 58.14,
+            "end": 58.88,
+            "words": [
+                {
+                    "word": "people",
+                    "start": 58.14,
+                    "end": 58.4
+                },
+                {
+                    "word": "think",
+                    "start": 58.4,
+                    "end": 58.66
+                },
+                {
+                    "word": "like,",
+                    "start": 58.66,
+                    "end": 58.88
+                }
+            ]
+        },
+        {
+            "text": "okay, if this",
+            "start": 58.88,
+            "end": 59.58,
+            "words": [
+                {
+                    "word": "okay,",
+                    "start": 58.88,
+                    "end": 59.1
+                },
+                {
+                    "word": "if",
+                    "start": 59.3,
+                    "end": 59.42
+                },
+                {
+                    "word": "this",
+                    "start": 59.42,
+                    "end": 59.58
+                }
+            ]
+        },
+        {
+            "text": "worked for them,",
+            "start": 59.58,
+            "end": 60.12,
+            "words": [
+                {
+                    "word": "worked",
+                    "start": 59.58,
+                    "end": 59.78
+                },
+                {
+                    "word": "for",
+                    "start": 59.78,
+                    "end": 59.92
+                },
+                {
+                    "word": "them,",
+                    "start": 59.92,
+                    "end": 60.12
+                }
+            ]
+        },
+        {
+            "text": "it could probably",
+            "start": 60.12,
+            "end": 60.62,
+            "words": [
+                {
+                    "word": "it",
+                    "start": 60.12,
+                    "end": 60.2
+                },
+                {
+                    "word": "could",
+                    "start": 60.2,
+                    "end": 60.32
+                },
+                {
+                    "word": "probably",
+                    "start": 60.32,
+                    "end": 60.62
+                }
+            ]
+        },
+        {
+            "text": "work for me. So",
+            "start": 60.62,
+            "end": 61.24,
+            "words": [
+                {
+                    "word": "work",
+                    "start": 60.62,
+                    "end": 60.84
+                },
+                {
+                    "word": "for",
+                    "start": 60.84,
+                    "end": 60.98
+                },
+                {
+                    "word": "me.",
+                    "start": 60.98,
+                    "end": 61.16
+                },
+                {
+                    "word": "So",
+                    "start": 61.16,
+                    "end": 61.24
+                }
+            ]
+        },
+        {
+            "text": "just remember, awareness",
+            "start": 61.24,
+            "end": 62.24,
+            "words": [
+                {
+                    "word": "just",
+                    "start": 61.24,
+                    "end": 61.42
+                },
+                {
+                    "word": "remember,",
+                    "start": 61.42,
+                    "end": 61.68
+                },
+                {
+                    "word": "awareness",
+                    "start": 61.94,
+                    "end": 62.24
+                }
+            ]
+        },
+        {
+            "text": "pulls people in, trust",
+            "start": 62.24,
+            "end": 63.3,
+            "words": [
+                {
+                    "word": "pulls",
+                    "start": 62.24,
+                    "end": 62.58
+                },
+                {
+                    "word": "people",
+                    "start": 62.58,
+                    "end": 62.82
+                },
+                {
+                    "word": "in,",
+                    "start": 62.82,
+                    "end": 63.08
+                },
+                {
+                    "word": "trust",
+                    "start": 63.08,
+                    "end": 63.3
+                }
+            ]
+        },
+        {
+            "text": "builds relationships and",
+            "start": 63.3,
+            "end": 64.6,
+            "words": [
+                {
+                    "word": "builds",
+                    "start": 63.3,
+                    "end": 63.64
+                },
+                {
+                    "word": "relationships",
+                    "start": 63.64,
+                    "end": 64.22
+                },
+                {
+                    "word": "and",
+                    "start": 64.22,
+                    "end": 64.6
+                }
+            ]
+        },
+        {
+            "text": "proof makes the sell.",
+            "start": 64.6,
+            "end": 65.9,
+            "words": [
+                {
+                    "word": "proof",
+                    "start": 64.6,
+                    "end": 65.02
+                },
+                {
+                    "word": "makes",
+                    "start": 65.02,
+                    "end": 65.46
+                },
+                {
+                    "word": "the",
+                    "start": 65.46,
+                    "end": 65.66
+                },
+                {
+                    "word": "sell.",
+                    "start": 65.66,
+                    "end": 65.9
+                }
+            ]
+        }
+    ]
+}
