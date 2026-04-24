@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import type { TimelineClip } from '../lib/db';
 import * as db from '../lib/db';
 
