@@ -55,6 +55,7 @@ export interface TimelineClip {
   end_time: number;
   timeline_start: number;
   audio_enabled: number;                     // 0 for muted, 1 for enabled
+  hidden: number;                            // 0 for visible, 1 for hidden
   // joined from assets
   file_path?: string;
   type?: string;
@@ -137,6 +138,9 @@ export async function runMigrations(): Promise<void> {
   } catch { /* column already exists */ }
   try {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN audio_enabled INTEGER DEFAULT 1`);
+  } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN hidden INTEGER DEFAULT 0`);
   } catch { /* column already exists */ }
 
   // Markers table
@@ -272,6 +276,11 @@ export async function updateClipTime(
     'UPDATE timeline_clips SET start_time=$1, end_time=$2, timeline_start=$3 WHERE id=$4',
     [startTime, endTime, timelineStart, clipId]
   );
+}
+
+export async function setClipHidden(clipId: number, hidden: boolean): Promise<void> {
+  const db = await getDb();
+  await db.execute('UPDATE timeline_clips SET hidden=$1 WHERE id=$2', [hidden ? 1 : 0, clipId]);
 }
 
 export async function splitClip(

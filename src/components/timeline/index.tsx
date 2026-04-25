@@ -369,6 +369,14 @@ export function Timeline({
     onTimelineChange();
   };
 
+  const handleToggleHidden = async (clipId: number, currentHidden: number) => {
+    onBeforeChange();
+    const db = await import('../../lib/db');
+    await db.setClipHidden(clipId, currentHidden !== 1);
+    setContextMenu(null);
+    onTimelineChange();
+  };
+
   const onClipRightClick = (e: React.MouseEvent, clipId: number) => {
     e.preventDefault();
     e.stopPropagation();
@@ -576,6 +584,7 @@ export function Timeline({
         onClipSelected={onClipSelected}
         onExtractAudio={handleExtractAudio}
         onToggleMute={handleToggleMute}
+        onToggleHidden={handleToggleHidden}
         onDuplicate={async () => {
           if (selectedClipIds.length === 0) return;
           onBeforeChange();

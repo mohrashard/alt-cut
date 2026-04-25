@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { TimelineClip } from '../../lib/db';
 
 // ─── Icons ────────────────────────────────────────────────────
@@ -7,6 +8,8 @@ const IcoUnmute    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill=
 const IcoDuplicate = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>;
 const IcoDelete    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>;
 const IcoSplit     = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="3" x2="12" y2="21" strokeDasharray="3 2"/><polyline points="8,6 12,2 16,6"/></svg>;
+const IcoEye       = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
+const IcoEyeOff    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>;
 
 // ─── Types ────────────────────────────────────────────────────
 interface ClipContextMenuProps {
@@ -17,6 +20,7 @@ interface ClipContextMenuProps {
   onClipSelected: (ids: number[]) => void;
   onExtractAudio: (clipId: number) => void;
   onToggleMute: (clipId: number, currentEnabled: number) => void;
+  onToggleHidden: (clipId: number, currentHidden: number) => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onSplit: () => void;
@@ -59,20 +63,37 @@ function CtxSeparator() {
 // ─── Clip context menu ─────────────────────────────────────────
 export function ClipContextMenu({
   contextMenu, clips, selectedClipIds,
-  onExtractAudio, onToggleMute, onDuplicate, onDelete, onSplit,
+  onExtractAudio, onToggleMute, onToggleHidden, onDuplicate, onDelete, onSplit,
 }: ClipContextMenuProps) {
   if (!contextMenu) return null;
   const clip = clips.find(c => c.id === contextMenu.clipId);
   if (!clip) return null;
 
-  const isVideo = clip.track_type === 'video';
-  const isMuted = clip.audio_enabled === 0;
+  const isVideo   = clip.track_type === 'video';
+  const isMuted   = clip.audio_enabled === 0;
+  const isHidden  = clip.hidden === 1;
 
   const count = selectedClipIds.length;
   const isMulti = count > 1;
 
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (contextMenu && menuRef.current) {
+      menuRef.current.style.top = `${contextMenu.y}px`;
+      menuRef.current.style.left = `${contextMenu.x}px`;
+      const rect = menuRef.current.getBoundingClientRect();
+      if (rect.bottom > window.innerHeight) {
+        menuRef.current.style.top = `${window.innerHeight - rect.height - 10}px`;
+      }
+      if (rect.right > window.innerWidth) {
+        menuRef.current.style.left = `${window.innerWidth - rect.width - 10}px`;
+      }
+    }
+  }, [contextMenu]);
+
   return (
-    <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
+    <div ref={menuRef} className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x, visibility: 'visible' }}>
       <CtxItem icon={<IcoSplit />}     label={isMulti ? `Split ${count} clips` : "Split at playhead"} shortcut="S"
         onClick={e => { e.stopPropagation(); onSplit(); }} />
       <CtxItem icon={<IcoDuplicate />} label={isMulti ? `Duplicate ${count} clips` : "Duplicate"}          shortcut="D"
@@ -90,6 +111,13 @@ export function ClipContextMenu({
         <CtxItem icon={<IcoExtract />} label="Extract audio"
           onClick={e => { e.stopPropagation(); onExtractAudio(clip.id); }} />
       )}
+      {!isMulti && (
+        <CtxItem
+          icon={isHidden ? <IcoEye /> : <IcoEyeOff />}
+          label={isHidden ? 'Show clip' : 'Hide clip'}
+          onClick={e => { e.stopPropagation(); onToggleHidden(clip.id, clip.hidden ?? 0); }}
+        />
+      )}
 
       <CtxSeparator />
       <CtxItem icon={<IcoDelete />} label={isMulti ? `Delete ${count} clips` : "Delete"} shortcut="Del" danger
@@ -100,9 +128,25 @@ export function ClipContextMenu({
 
 // ─── Marker context menu ───────────────────────────────────────
 export function MarkerContextMenu({ markerCtxMenu, onDeleteMarker, onClose }: MarkerContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (markerCtxMenu && menuRef.current) {
+      menuRef.current.style.top = `${markerCtxMenu.y}px`;
+      menuRef.current.style.left = `${markerCtxMenu.x}px`;
+      const rect = menuRef.current.getBoundingClientRect();
+      if (rect.bottom > window.innerHeight) {
+        menuRef.current.style.top = `${window.innerHeight - rect.height - 10}px`;
+      }
+      if (rect.right > window.innerWidth) {
+        menuRef.current.style.left = `${window.innerWidth - rect.width - 10}px`;
+      }
+    }
+  }, [markerCtxMenu]);
+
   if (!markerCtxMenu) return null;
   return (
-    <div className="context-menu" style={{ top: markerCtxMenu.y, left: markerCtxMenu.x }}
+    <div ref={menuRef} className="context-menu" style={{ top: markerCtxMenu.y, left: markerCtxMenu.x }}
       onClick={onClose}>
       <CtxItem icon={<IcoDelete />} label="Delete marker" danger
         onClick={async e => { e.stopPropagation(); onDeleteMarker(markerCtxMenu.markerId); }} />

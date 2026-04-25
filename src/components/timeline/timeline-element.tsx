@@ -125,6 +125,7 @@ export function TimelineElement({
   const leftPx     = tStart * pps;
   const widthPx    = Math.max(dur * pps, 8);
   const isSel      = isSelected;
+  const isHidden   = clip.hidden === 1;
   const isBusy     = clip.ai_metadata?.['captions']?.status === 'processing' ||
                      clip.ai_metadata?.['denoise']?.status === 'processing';
   const isDragging = dragClip?.clipId === clip.id;
@@ -133,7 +134,7 @@ export function TimelineElement({
 
   return (
     <div
-      className={`clip-block ${trackType} ${isSel ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isMuted ? 'muted' : ''}`}
+      className={`clip-block ${trackType} ${isSel ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isMuted ? 'muted' : ''} ${isHidden ? 'clip-hidden' : ''}`}
       style={{ left: leftPx, width: widthPx, position: 'absolute', top: '50%', transform: 'translateY(-50%)' }}
       onClick={(e) => { e.stopPropagation(); onClipSelected(e, clip.id); }}
       onMouseDown={(e) => { if (e.button === 0) onClipDragStart(e, clip); }}
