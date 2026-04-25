@@ -14,17 +14,6 @@ fn find_python(root: &PathBuf) -> PathBuf {
     if win.exists() { win } else { root.join("backend_env").join("bin").join("python") }
 }
 
-#[derive(Deserialize)]
-struct Features {
-    #[serde(rename = "autoCaptions")]
-    auto_captions: bool,
-    #[serde(rename = "removeSilence")]
-    remove_silence: bool,
-    #[serde(rename = "fontFamily")]
-    font_family: String,
-    #[serde(rename = "animationStyle")]
-    animation_style: String,
-}
 
 #[derive(Serialize)]
 struct AiJobResult {
