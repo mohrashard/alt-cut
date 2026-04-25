@@ -12,9 +12,10 @@ import {
 import { fmt, getRulerTicks } from './utils';
 import { TimelineRuler } from './timeline-ruler';
 import { SnapIndicator } from './snap-indicator';
-import { TimelineElement } from './timeline-element';
+import { TimelineElement, AudioShadowElement } from './timeline-element';
 import { TimelineToolbar } from './timeline-toolbar';
 import { TimelineTrackLabels } from './timeline-track';
+import { ClipContextMenu, MarkerContextMenu } from './timeline-context-menu';
 
 export function Timeline({
   clips, videoDuration, selectedClipId, playheadSeconds,
@@ -160,8 +161,6 @@ export function Timeline({
       currentStart: clip.start_time, currentEnd: clip.end_time,
       currentTimelineStart: clip.timeline_start,
     });
-    document.addEventListener('mousemove', onTrimDrag);
-    document.addEventListener('mouseup', onTrimRelease, { once: true });
   };
 
   const onTrimDrag = useCallback((e: MouseEvent) => {
@@ -187,20 +186,17 @@ export function Timeline({
   }, [trimState, pps, snapSeconds]);
 
   const onTrimRelease = useCallback(async () => {
-    document.removeEventListener('mousemove', onTrimDrag);
     if (!trimState) return;
     const db = await import('../../lib/db');
     await db.updateClipTime(trimState.clipId, trimState.currentStart, trimState.currentEnd, trimState.currentTimelineStart);
     setTrimState(null);
     setSnapGuideX(null);
     onTimelineChange();
-  }, [trimState, onTrimDrag, onTimelineChange]);
+  }, [trimState, onTimelineChange]);
 
   const onClipDragStart = (e: React.MouseEvent, clip: TimelineClip) => {
     e.stopPropagation();
     setDragClip({ clipId: clip.id, startMouseX: e.clientX, origTimelineStart: clip.timeline_start, currentTimelineStart: clip.timeline_start });
-    document.addEventListener('mousemove', onClipDragging);
-    document.addEventListener('mouseup', onClipDragEnd, { once: true });
   };
 
   const onClipDragging = useCallback(async (e: MouseEvent) => {
@@ -213,7 +209,6 @@ export function Timeline({
   }, [dragClip, pps, snapSeconds]);
 
   const onClipDragEnd = useCallback(async (_e: MouseEvent) => {
-    document.removeEventListener('mousemove', onClipDragging);
     if (!dragClip) return;
     const snapped = dragClip.currentTimelineStart;
     const db      = await import('../../lib/db');
@@ -225,7 +220,34 @@ export function Timeline({
     setDragClip(null);
     setSnapGuideX(null);
     onTimelineChange();
-  }, [dragClip, pps, snapSeconds, clips, onTimelineChange, onBeforeChange]);
+  }, [dragClip, clips, onTimelineChange, onBeforeChange]);
+
+  // ─── BUG FIX: Attach global drag listeners via useEffect ───────────────────
+  // We MUST attach mousemove/mouseup listeners here rather than inside the onMouseDown handlers.
+  // This prevents the "stale closure" bug where the mouseup handler is bound to the
+  // initial `null` state, causing it to return early and leave the app in a permanent
+  // dragging state (which triggers infinite edge auto-scrolling).
+  useEffect(() => {
+    if (trimState) {
+      document.addEventListener('mousemove', onTrimDrag);
+      document.addEventListener('mouseup', onTrimRelease);
+      return () => {
+        document.removeEventListener('mousemove', onTrimDrag);
+        document.removeEventListener('mouseup', onTrimRelease);
+      };
+    }
+  }, [trimState, onTrimDrag, onTrimRelease]);
+
+  useEffect(() => {
+    if (dragClip) {
+      document.addEventListener('mousemove', onClipDragging);
+      document.addEventListener('mouseup', onClipDragEnd);
+      return () => {
+        document.removeEventListener('mousemove', onClipDragging);
+        document.removeEventListener('mouseup', onClipDragEnd);
+      };
+    }
+  }, [dragClip, onClipDragging, onClipDragEnd]);
 
   const handleSplit = async () => {
     if (selectedClipId === null) return;
@@ -458,8 +480,12 @@ export function Timeline({
                 const leftPx  = clip.timeline_start * pps;
                 const widthPx = Math.max(dur * pps, 8);
                 return (
-                  <div key={`va-${clip.id}`} className="clip-block audio-shadow"
-                    style={{ left: leftPx, width: widthPx, position: 'absolute', top: '50%', transform: 'translateY(-50%)' }}
+                  <AudioShadowElement
+                    key={`va-${clip.id}`}
+                    clip={clip}
+                    dur={dur}
+                    leftPx={leftPx}
+                    widthPx={widthPx}
                   />
                 );
               })}
@@ -470,48 +496,34 @@ export function Timeline({
       </div>
 
       {/* ── Clip context menu ── */}
-      {contextMenu && (
-        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
-          {(() => {
-            const clip    = clips.find(c => c.id === contextMenu.clipId);
-            if (!clip) return null;
-            const isVideo = clip.track_type === 'video';
-            const isMuted = clip.audio_enabled === 0;
-            return (
-              <>
-                {isVideo && <button onClick={() => handleExtractAudio(clip.id)}>🎵 Extract Audio</button>}
-                {isVideo && (
-                  <button onClick={() => handleToggleMute(clip.id, clip.audio_enabled ?? 1)}>
-                    {isMuted ? '🔊 Unmute Audio' : '🔇 Mute Audio'}
-                  </button>
-                )}
-                <button onClick={async () => {
-                  onBeforeChange();
-                  const db = await import('../../lib/db');
-                  await db.addClipToTimeline(clip.project_id, clip.asset_id,
-                    clip.end_time - clip.start_time, clip.track_type || 'video', clip.track_lane ?? 0);
-                  setContextMenu(null);
-                  onTimelineChange();
-                }}>📋 Duplicate</button>
-                <button onClick={() => handleDelete(contextMenu.clipId)}>🗑️ Delete</button>
-              </>
-            );
-          })()}
-        </div>
-      )}
+      <ClipContextMenu
+        contextMenu={contextMenu}
+        clips={clips}
+        onExtractAudio={handleExtractAudio}
+        onToggleMute={handleToggleMute}
+        onDuplicate={async (clip) => {
+          onBeforeChange();
+          const db = await import('../../lib/db');
+          await db.addClipToTimeline(clip.project_id, clip.asset_id,
+            clip.end_time - clip.start_time, clip.track_type || 'video', clip.track_lane ?? 0);
+          setContextMenu(null);
+          onTimelineChange();
+        }}
+        onDelete={(clipId) => handleDelete(clipId)}
+        onSplit={handleSplit}
+      />
 
       {/* ── Marker context menu ── */}
-      {markerCtxMenu && (
-        <div className="context-menu" style={{ top: markerCtxMenu.y, left: markerCtxMenu.x }}
-          onClick={() => setMarkerCtxMenu(null)}>
-          <button onClick={async () => {
-            const db = await import('../../lib/db');
-            await db.deleteMarker(markerCtxMenu.markerId);
-            setMarkerCtxMenu(null);
-            onMarkersChange();
-          }}>🗑️ Delete Marker</button>
-        </div>
-      )}
+      <MarkerContextMenu
+        markerCtxMenu={markerCtxMenu}
+        onDeleteMarker={async (markerId) => {
+          const db = await import('../../lib/db');
+          await db.deleteMarker(markerId);
+          setMarkerCtxMenu(null);
+          onMarkersChange();
+        }}
+        onClose={() => setMarkerCtxMenu(null)}
+      />
     </div>
   );
 }
