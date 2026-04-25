@@ -49,11 +49,12 @@ export interface TimelineClip {
   project_id: number;
   asset_id: number;
   track_index: number;
-  track_type: 'video' | 'audio' | 'text';   // NEW
-  track_lane: number;                         // NEW – stacking lane
+  track_type: 'video' | 'audio' | 'text';
+  track_lane: number;
   start_time: number;
   end_time: number;
   timeline_start: number;
+  audio_enabled: number;                     // 0 for muted, 1 for enabled
   // joined from assets
   file_path?: string;
   type?: string;
@@ -134,6 +135,10 @@ export async function runMigrations(): Promise<void> {
   try {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN track_lane INTEGER DEFAULT 0`);
   } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN audio_enabled INTEGER DEFAULT 1`);
+  } catch { /* column already exists */ }
+
   // Markers table
   await db.execute(`
     CREATE TABLE IF NOT EXISTS markers (
@@ -170,6 +175,7 @@ export async function getTimelineClips(projectId: number): Promise<TimelineClip[
     // Default track_type for old rows that predate migration
     if (!clip.track_type) clip.track_type = 'video';
     if (clip.track_lane == null) clip.track_lane = 0;
+    if (clip.audio_enabled == null) clip.audio_enabled = 1;
   }
 
   return clips;
@@ -201,9 +207,9 @@ export async function addClipToTimeline(
 
   const { lastInsertId } = await db.execute(
     `INSERT INTO timeline_clips
-       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [projectId, assetId, newTrackIndex, trackType, trackLane, 0, duration, newTimelineStart]
+       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [projectId, assetId, newTrackIndex, trackType, trackLane, 0, duration, newTimelineStart, 1]
   );
 
   const query = `
@@ -236,9 +242,9 @@ export async function addClipToTimelineSpecific(
 
   const { lastInsertId } = await db.execute(
     `INSERT INTO timeline_clips
-       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [projectId, assetId, newTrackIndex, trackType, trackLane, 0, duration, timelineStart]
+       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [projectId, assetId, newTrackIndex, trackType, trackLane, 0, duration, timelineStart, 1]
   );
 
   const query = `
@@ -301,8 +307,8 @@ export async function splitClip(
   // Insert Part B immediately after Part A
   await db.execute(
     `INSERT INTO timeline_clips
-       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
     [
       clip.project_id,
       clip.asset_id,
@@ -312,6 +318,7 @@ export async function splitClip(
       absStartTime,
       clip.end_time,
       clip.timeline_start + splitLocalTime,
+      clip.audio_enabled ?? 1,
     ]
   );
 }
@@ -371,15 +378,44 @@ export async function restoreTimelineClips(
     await db.execute(
       `INSERT OR REPLACE INTO timeline_clips
          (id, project_id, asset_id, track_index, track_type, track_lane,
-          start_time, end_time, timeline_start)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          start_time, end_time, timeline_start, audio_enabled)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         clip.id, clip.project_id, clip.asset_id, clip.track_index,
         clip.track_type || 'video', clip.track_lane ?? 0,
         clip.start_time, clip.end_time, clip.timeline_start,
+        clip.audio_enabled ?? 1,
       ]
     );
   }
+}
+
+export async function extractAudio(clipId: number): Promise<void> {
+  const db = await getDb();
+  const clips = await db.select<TimelineClip[]>(
+    'SELECT * FROM timeline_clips WHERE id = $1', [clipId]
+  );
+  if (!clips.length) return;
+  const clip = clips[0];
+
+  // Mute original video
+  await db.execute('UPDATE timeline_clips SET audio_enabled = 0 WHERE id = $1', [clipId]);
+
+  // Create detached audio clip
+  await db.execute(
+    `INSERT INTO timeline_clips 
+       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      clip.project_id, clip.asset_id, clip.track_index, 'audio', 0, 
+      clip.start_time, clip.end_time, clip.timeline_start, 1
+    ]
+  );
+}
+
+export async function setAudioEnabled(clipId: number, enabled: boolean): Promise<void> {
+  const db = await getDb();
+  await db.execute('UPDATE timeline_clips SET audio_enabled = $1 WHERE id = $2', [enabled ? 1 : 0, clipId]);
 }
 
 // ─── Markers ──────────────────────────────────────────────────

@@ -40,6 +40,7 @@ export const HormoziCaptions: React.FC<Props> = ({
                       src={clip.previewSrc || clip.file_path}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       startFrom={secondsToFrame(clip.start_time, fps)}
+                      muted={clip.audio_enabled === 0}
                     />
                   </AbsoluteFill>
                 </Series.Sequence>

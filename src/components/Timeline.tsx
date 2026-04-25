@@ -410,6 +410,22 @@ export function Timeline({
     handleZoom(w / videoDuration);
   };
 
+  const handleExtractAudio = async (clipId: number) => {
+    onBeforeChange();
+    const db = await import('../lib/db');
+    await db.extractAudio(clipId);
+    setContextMenu(null);
+    onTimelineChange();
+  };
+
+  const handleToggleMute = async (clipId: number, currentEnabled: number) => {
+    onBeforeChange();
+    const db = await import('../lib/db');
+    await db.setAudioEnabled(clipId, currentEnabled === 0);
+    setContextMenu(null);
+    onTimelineChange();
+  };
+
   // ── Context menu ─────────────────────────────────────────
   const onClipRightClick = (e: React.MouseEvent, clipId: number) => {
     e.preventDefault();
@@ -474,13 +490,15 @@ export function Timeline({
                      clip.ai_metadata?.['denoise']?.status === 'processing';
     const isDragging = dragClip?.clipId === clip.id;
 
+    const isMuted  = clip.audio_enabled === 0;
+
     const label = clip.file_path?.split(/[/\\]/).pop() ?? '';
     const shortLabel = dur < 2 ? '' : label;
 
     return (
       <div
         key={clip.id}
-        className={`clip-block ${trackType} ${isSel ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+        className={`clip-block ${trackType} ${isSel ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isMuted ? 'muted' : ''}`}
         style={{ left: leftPx, width: widthPx, position: 'absolute', top: '50%', transform: 'translateY(-50%)' }}
         onClick={(e) => { e.stopPropagation(); onClipSelected(isSel ? null : clip.id); }}
         onMouseDown={(e) => { if (e.button === 0) onClipDragStart(e, clip); }}
@@ -496,6 +514,7 @@ export function Timeline({
         {/* Clip content */}
         <div className="clip-label">
           {isBusy && <span className="spin" style={{ marginRight: 4 }}>⚙️</span>}
+          {isMuted && <span style={{ marginRight: 4 }}>🔇</span>}
           <span>{shortLabel}</span>
           {trackType === 'video' && <span className="clip-dur">{fmt(dur)}</span>}
         </div>
@@ -686,8 +705,9 @@ export function Timeline({
                 </div>
               )}
               {audioClips.map(c => renderClip(c, 'audio'))}
-              {/* Audio shadow from video clips */}
+              {/* Audio shadow from video clips (only if audio is enabled) */}
               {videoClips.map(clip => {
+                if (clip.audio_enabled === 0) return null;
                 const dur    = clip.end_time - clip.start_time;
                 const leftPx = clip.timeline_start * pps;
                 const widthPx = Math.max(dur * pps, 8);
@@ -708,18 +728,34 @@ export function Timeline({
       {/* ── Clip context menu ──────────────────────────── */}
       {contextMenu && (
         <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
-          <button onClick={() => handleDelete(contextMenu.clipId)}>🗑️ Delete</button>
-          <button onClick={async () => {
+          {(() => {
             const clip = clips.find(c => c.id === contextMenu.clipId);
-            if (clip) {
-              onBeforeChange();
-              const db = await import('../lib/db');
-              await db.addClipToTimeline(clip.project_id, clip.asset_id,
-                clip.end_time - clip.start_time, clip.track_type || 'video', clip.track_lane ?? 0);
-              setContextMenu(null);
-              onTimelineChange();
-            }
-          }}>📋 Duplicate</button>
+            if (!clip) return null;
+            const isVideo = clip.track_type === 'video';
+            const isMuted = clip.audio_enabled === 0;
+
+            return (
+              <>
+                {isVideo && (
+                  <button onClick={() => handleExtractAudio(clip.id)}>🎵 Extract Audio</button>
+                )}
+                {isVideo && (
+                  <button onClick={() => handleToggleMute(clip.id, clip.audio_enabled)}>
+                    {isMuted ? '🔊 Unmute Audio' : '🔇 Mute Audio'}
+                  </button>
+                )}
+                <button onClick={async () => {
+                  onBeforeChange();
+                  const db = await import('../lib/db');
+                  await db.addClipToTimeline(clip.project_id, clip.asset_id,
+                    clip.end_time - clip.start_time, clip.track_type || 'video', clip.track_lane ?? 0);
+                  setContextMenu(null);
+                  onTimelineChange();
+                }}>📋 Duplicate</button>
+                <button onClick={() => handleDelete(contextMenu.clipId)}>🗑️ Delete</button>
+              </>
+            );
+          })()}
         </div>
       )}
 
