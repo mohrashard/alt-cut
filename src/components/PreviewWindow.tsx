@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import { Player, PlayerRef } from "@remotion/player";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { HormoziCaptions } from "../remotion/HormoziCaptions";
@@ -11,29 +11,62 @@ interface PreviewWindowProps {
   setFeatures: (f: AppFeatures) => void;
   videoDuration?: number;
   playheadSeconds?: number;
+  onPlayheadChange?: (sec: number) => void;
 }
 
 export function PreviewWindow({
-  clips, features, setFeatures, videoDuration = 0, playheadSeconds = 0
+  clips, features, setFeatures, videoDuration = 0, playheadSeconds = 0, onPlayheadChange
 }: PreviewWindowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef    = useRef<PlayerRef>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const lastUpdateRef = useRef(playheadSeconds);
 
-  // Seek Remotion Player when playhead changes (from ruler click or drag)
+  // Sync Remotion frame -> Timeline playhead
+  useEffect(() => {
+    let raf: number;
+    const loop = () => {
+      if (playerRef.current && playerRef.current.isPlaying() && onPlayheadChange) {
+        const currentFrame = playerRef.current.getCurrentFrame();
+        const sec = currentFrame / 30;
+        // Throttle updates slightly to avoid choking React, or just update if diff is > 0
+        if (Math.abs(sec - lastUpdateRef.current) > 0.02) {
+          lastUpdateRef.current = sec;
+          onPlayheadChange(sec);
+        }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [onPlayheadChange]);
+
+  // Sync Timeline playhead -> Remotion frame (external seeks)
   useEffect(() => {
     if (playerRef.current && videoDuration > 0) {
-      const fps   = 30;
-      const frame = Math.round(playheadSeconds * fps);
-      playerRef.current.seekTo(frame);
+      const frame = Math.round(playheadSeconds * 30);
+      const current = playerRef.current.getCurrentFrame();
+      // Only seek if difference is large (meaning user clicked ruler) and player is NOT actively playing
+      if (Math.abs(current - frame) > 1 && !playerRef.current.isPlaying()) {
+        playerRef.current.seekTo(frame);
+        lastUpdateRef.current = playheadSeconds;
+      }
     }
   }, [playheadSeconds, videoDuration]);
 
   // Convert local file paths to asset:// URLs for Remotion preview
-  const previewClips = clips.map(clip => ({
+  const previewClips = useMemo(() => clips.map(clip => ({
     ...clip,
     previewSrc: clip.file_path ? convertFileSrc(clip.file_path) : null,
-  }));
+  })), [clips]);
+
+  const inputProps = useMemo(() => ({
+    clips: previewClips,
+    fontFamily: features?.fontFamily,
+    animationStyle: features?.animationStyle,
+    captionX: features?.captionX,
+    captionY: features?.captionY,
+  }), [previewClips, features]);
 
   const playerDuration = Math.max(1, Math.round(videoDuration * 30));
 
@@ -81,13 +114,7 @@ export function PreviewWindow({
             <Player
               ref={playerRef}
               component={HormoziCaptions as any}
-              inputProps={{
-                clips: previewClips,
-                fontFamily: features?.fontFamily,
-                animationStyle: features?.animationStyle,
-                captionX: features?.captionX,
-                captionY: features?.captionY,
-              }}
+              inputProps={inputProps}
               durationInFrames={playerDuration}
               compositionWidth={1080}
               compositionHeight={1920}

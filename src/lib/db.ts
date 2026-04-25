@@ -36,6 +36,14 @@ export interface AiMetadata {
   status: string;
 }
 
+export interface Marker {
+  id: number;
+  project_id: number;
+  time_seconds: number;
+  label: string;
+  color: string;
+}
+
 export interface TimelineClip {
   id: number;
   project_id: number;
@@ -126,6 +134,17 @@ export async function runMigrations(): Promise<void> {
   try {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN track_lane INTEGER DEFAULT 0`);
   } catch { /* column already exists */ }
+  // Markers table
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS markers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      time_seconds REAL NOT NULL,
+      label TEXT DEFAULT '',
+      color TEXT DEFAULT '#ffcc00',
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
 }
 
 // ─── Timeline Clips ───────────────────────────────────────────
@@ -336,4 +355,59 @@ export async function upsertAiMetadata(
       [clipId, featureType, status, jsonData]
     );
   }
+}
+
+// ─── Undo / Redo ──────────────────────────────────────────────
+// Restores an exact snapshot by deleting all clips for the project and
+// reinserting them with their original IDs. ai_metadata is safe because
+// it references clip IDs which are preserved by INSERT OR REPLACE.
+export async function restoreTimelineClips(
+  projectId: number,
+  clips: TimelineClip[]
+): Promise<void> {
+  const db = await getDb();
+  await db.execute('DELETE FROM timeline_clips WHERE project_id = $1', [projectId]);
+  for (const clip of clips) {
+    await db.execute(
+      `INSERT OR REPLACE INTO timeline_clips
+         (id, project_id, asset_id, track_index, track_type, track_lane,
+          start_time, end_time, timeline_start)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        clip.id, clip.project_id, clip.asset_id, clip.track_index,
+        clip.track_type || 'video', clip.track_lane ?? 0,
+        clip.start_time, clip.end_time, clip.timeline_start,
+      ]
+    );
+  }
+}
+
+// ─── Markers ──────────────────────────────────────────────────
+
+export async function addMarker(
+  projectId: number,
+  timeSeconds: number,
+  label = '',
+  color = '#ffcc00'
+): Promise<Marker> {
+  const db = await getDb();
+  const { lastInsertId } = await db.execute(
+    'INSERT INTO markers (project_id, time_seconds, label, color) VALUES ($1,$2,$3,$4)',
+    [projectId, timeSeconds, label, color]
+  );
+  const rows = await db.select<Marker[]>('SELECT * FROM markers WHERE id = $1', [lastInsertId]);
+  return rows[0];
+}
+
+export async function getMarkers(projectId: number): Promise<Marker[]> {
+  const db = await getDb();
+  return db.select<Marker[]>(
+    'SELECT * FROM markers WHERE project_id = $1 ORDER BY time_seconds ASC',
+    [projectId]
+  );
+}
+
+export async function deleteMarker(markerId: number): Promise<void> {
+  const db = await getDb();
+  await db.execute('DELETE FROM markers WHERE id = $1', [markerId]);
 }

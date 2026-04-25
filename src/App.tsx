@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DndContext, DragEndEvent, pointerWithin } from '@dnd-kit/core';
-import type { TimelineClip } from './lib/db';
+import type { TimelineClip, Marker } from './lib/db';
 
 import { TopNav } from "./components/TopNav";
 import { MediaSidebar } from "./components/MediaSidebar";
@@ -53,12 +53,16 @@ const FiltersIcon = () => (
 );
 const AdjustIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+    <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+    <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+    <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+    <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
   </svg>
 );
 const TemplatesIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+    <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
   </svg>
 );
 const AiIcon = () => (
@@ -91,27 +95,84 @@ function App() {
   const [currentProject, setCurrentProject] = useState<any>(null);
   const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<number | null>(null);
+  const [markers, setMarkers] = useState<Marker[]>([]);
+
+  // ── Undo/Redo history (ref-based to avoid re-render on push) ─
+  const historyRef      = useRef<TimelineClip[][]>([]);
+  const historyIndexRef = useRef<number>(-1);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   const selectedClip = timelineClips.find(c => c.id === selectedClipId) || null;
 
-  const loadTimeline = async (projectId: number) => {
+  // Push current clips to the history stack before a mutation
+  const pushHistory = useCallback((clips: TimelineClip[]) => {
+    // Trim any forward (redo) history
+    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+    historyRef.current.push(JSON.parse(JSON.stringify(clips)));
+    historyIndexRef.current = historyRef.current.length - 1;
+    setCanUndo(historyIndexRef.current > 0);
+    setCanRedo(false);
+  }, []);
+
+  const loadMarkers = useCallback(async (projectId: number) => {
+    const db = await import('./lib/db');
+    const m = await db.getMarkers(projectId);
+    setMarkers(m);
+  }, []);
+
+  const loadTimeline = useCallback(async (projectId: number) => {
     const db = await import('./lib/db');
     const clips = await db.getTimelineClips(projectId);
     setTimelineClips(clips);
-  };
+    await loadMarkers(projectId);
+  }, [loadMarkers]);
+
+  const handleUndo = useCallback(async () => {
+    if (historyIndexRef.current <= 0) return;
+    historyIndexRef.current--;
+    const prevState = historyRef.current[historyIndexRef.current];
+    const db = await import('./lib/db');
+    if (currentProject) {
+      await db.restoreTimelineClips(currentProject.id, prevState);
+      setTimelineClips(prevState);
+    }
+    setCanUndo(historyIndexRef.current > 0);
+    setCanRedo(true);
+  }, [currentProject]);
+
+  const handleRedo = useCallback(async () => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    historyIndexRef.current++;
+    const nextState = historyRef.current[historyIndexRef.current];
+    const db = await import('./lib/db');
+    if (currentProject) {
+      await db.restoreTimelineClips(currentProject.id, nextState);
+      setTimelineClips(nextState);
+    }
+    setCanUndo(true);
+    setCanRedo(historyIndexRef.current < historyRef.current.length - 1);
+  }, [currentProject]);
 
   useEffect(() => {
     import('./lib/db').then(async (db) => {
       try {
-        await db.runMigrations();          // ensure track_type, track_lane columns exist
+        await db.runMigrations();
         const project = await db.ensureDefaultProject();
         setCurrentProject(project);
-        loadTimeline(project.id);
+        const clips = await db.getTimelineClips(project.id);
+        setTimelineClips(clips);
+        await loadMarkers(project.id);
+        // Seed history with the initial loaded state
+        historyRef.current = [JSON.parse(JSON.stringify(clips))];
+        historyIndexRef.current = 0;
+        setCanUndo(false);
+        setCanRedo(false);
       } catch (err) {
         console.error('Failed to load project from DB:', err);
       }
     });
-  }, []);
+  }, [loadMarkers]);
 
   const handleMediaAdded = (_filePath: string) => { /* no-op */ };
   const handleMediaSelected = (_path: string) => { /* no-op */ };
@@ -125,7 +186,8 @@ function App() {
       const db = await import('./lib/db');
       const dur = asset.duration > 0 ? asset.duration : 1.0;
 
-      // Determine which track it was dropped on
+      pushHistory(timelineClips); // snapshot before mutation
+
       if (over?.id === 'timeline-audio-droppable') {
         await db.addClipToTimeline(currentProject.id, asset.id, dur, 'audio', 0);
       } else if (over?.id === 'timeline-droppable') {
@@ -152,10 +214,6 @@ function App() {
     }
     setIsRendering(true);
     try {
-      // Convert file paths to asset:// URLs for Remotion CLI if needed, 
-      // but actually Remotion CLI in Node can read local file paths natively!
-      // So we can just pass the clips as-is.
-      
       const payload = {
         clips: timelineClips,
         fontFamily: features?.fontFamily || 'Arial',
@@ -164,10 +222,7 @@ function App() {
         captionY: features?.captionY || 80,
         durationInFrames: Math.max(1, Math.round(videoDuration * 30))
       };
-
-      const payloadString = JSON.stringify(payload);
-
-      await invoke('run_render_pipeline', { payloadJson: payloadString });
+      await invoke('run_render_pipeline', { payloadJson: JSON.stringify(payload) });
       alert('✅ Export Successful!');
     } catch (error) {
       alert(`❌ Export Failed: ${error}`);
@@ -215,10 +270,11 @@ function App() {
               features={features}
               setFeatures={setFeatures}
               playheadSeconds={playheadSeconds}
+              onPlayheadChange={setPlayheadSeconds}
               videoDuration={videoDuration}
             />
 
-            {/* Timeline (pinned to bottom of workspace) */}
+            {/* Timeline */}
             <Timeline
               clips={timelineClips}
               videoDuration={videoDuration}
@@ -227,6 +283,14 @@ function App() {
               onClipSelected={setSelectedClipId}
               onPlayheadChange={setPlayheadSeconds}
               onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
+              onBeforeChange={() => pushHistory(timelineClips)}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              markers={markers}
+              projectId={currentProject?.id ?? null}
+              onMarkersChange={() => currentProject && loadMarkers(currentProject.id)}
             />
           </div>
 
