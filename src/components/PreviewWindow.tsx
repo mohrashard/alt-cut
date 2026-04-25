@@ -12,45 +12,77 @@ interface PreviewWindowProps {
   videoDuration?: number;
   playheadSeconds?: number;
   onPlayheadChange?: (sec: number) => void;
+  // Ref to the playhead DOM node for zero-re-render position updates
+  playheadDomRef?: React.RefObject<HTMLDivElement | null>;
+  // Ref to the timecode span for zero-re-render text updates
+  timecodeDomRef?: React.RefObject<HTMLSpanElement | null>;
+  pps?: number;
 }
 
 export function PreviewWindow({
-  clips, features, setFeatures, videoDuration = 0, playheadSeconds = 0, onPlayheadChange
+  clips, features, setFeatures, videoDuration = 0, playheadSeconds = 0,
+  onPlayheadChange, playheadDomRef, timecodeDomRef, pps = 80
 }: PreviewWindowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef    = useRef<PlayerRef>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const lastUpdateRef = useRef(playheadSeconds);
 
-  // Sync Remotion frame -> Timeline playhead
+  // ── RAF loop: pure DOM mutation, zero React state updates during playback ──
   useEffect(() => {
+    // Pre-compute a formatter that mirrors Timeline's fmt() for the timecode display
+    const fmtTime = (s: number) => {
+      const m  = Math.floor(s / 60);
+      const ss = Math.floor(s % 60);
+      const ms = Math.floor((s % 1) * 10);
+      return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}.${ms}`;
+    };
+
     let raf: number;
     const loop = () => {
-      if (playerRef.current && playerRef.current.isPlaying() && onPlayheadChange) {
+      if (playerRef.current) {
         const currentFrame = playerRef.current.getCurrentFrame();
         const sec = currentFrame / 30;
-        // Throttle updates slightly to avoid choking React, or just update if diff is > 0
-        if (Math.abs(sec - lastUpdateRef.current) > 0.02) {
-          lastUpdateRef.current = sec;
-          onPlayheadChange(sec);
+
+        // 1. Move playhead line directly — no setState, no re-render
+        if (playheadDomRef?.current) {
+          playheadDomRef.current.style.left = `${sec * pps}px`;
         }
+
+        // 2. Update timecode text directly — no setState, no re-render
+        if (timecodeDomRef?.current) {
+          timecodeDomRef.current.textContent = `${fmtTime(sec)} / ${fmtTime(videoDuration)}`;
+        }
+
+        // 3. Only sync React state when player STOPS (so ruler/toolbar stay correct)
+        // This is handled by the Remotion Player's onPause callback below.
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
+  }, [playheadDomRef, timecodeDomRef, pps, videoDuration]);
+
+  // ── Sync React state on pause only (via Remotion's event API) ──
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player) return;
+    const onPause = () => {
+      if (onPlayheadChange) {
+        onPlayheadChange(player.getCurrentFrame() / 30);
+      }
+    };
+    player.addEventListener('pause', onPause);
+    return () => player.removeEventListener('pause', onPause);
   }, [onPlayheadChange]);
 
-  // Sync Timeline playhead -> Remotion frame (external seeks)
+  // ── External seek (ruler click / drag): seek the player when paused ──
   useEffect(() => {
-    if (playerRef.current && videoDuration > 0) {
-      const frame = Math.round(playheadSeconds * 30);
-      const current = playerRef.current.getCurrentFrame();
-      // Only seek if difference is large (meaning user clicked ruler) and player is NOT actively playing
-      if (Math.abs(current - frame) > 1 && !playerRef.current.isPlaying()) {
-        playerRef.current.seekTo(frame);
-        lastUpdateRef.current = playheadSeconds;
-      }
+    if (!playerRef.current || videoDuration <= 0) return;
+    if (playerRef.current.isPlaying()) return; // absolute guard: never interrupt active playback
+    const frame = Math.round(playheadSeconds * 30);
+    const current = playerRef.current.getCurrentFrame();
+    if (Math.abs(current - frame) > 1) {
+      playerRef.current.seekTo(frame);
     }
   }, [playheadSeconds, videoDuration]);
 

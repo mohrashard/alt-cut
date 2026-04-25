@@ -91,6 +91,9 @@ function App() {
   const [features, setFeatures] = useState<AppFeatures | null>(null);
   const [activeToolTab, setActiveToolTab] = useState('media');
   const [playheadSeconds, setPlayheadSeconds] = useState(0);
+  const [pps, setPps] = useState(80); // mirrors Timeline's pps for PreviewWindow
+  const playheadDomRef = useRef<HTMLDivElement | null>(null);
+  const timecodeDomRef = useRef<HTMLSpanElement | null>(null);
 
   const [currentProject, setCurrentProject] = useState<any>(null);
   const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
@@ -271,6 +274,9 @@ function App() {
               setFeatures={setFeatures}
               playheadSeconds={playheadSeconds}
               onPlayheadChange={setPlayheadSeconds}
+              playheadDomRef={playheadDomRef}
+              timecodeDomRef={timecodeDomRef}
+              pps={pps}
               videoDuration={videoDuration}
             />
 
@@ -291,6 +297,9 @@ function App() {
               markers={markers}
               projectId={currentProject?.id ?? null}
               onMarkersChange={() => currentProject && loadMarkers(currentProject.id)}
+              playheadDomRef={playheadDomRef}
+              onPpsChange={setPps}
+              timecodeDomRef={timecodeDomRef}
             />
           </div>
 

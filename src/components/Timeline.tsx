@@ -35,6 +35,11 @@ interface TimelineProps {
   markers: Marker[];
   projectId: number | null;
   onMarkersChange: () => void;
+  // Ref for direct DOM playhead mutation (smooth playback)
+  playheadDomRef?: React.RefObject<HTMLDivElement | null>;
+  onPpsChange?: (pps: number) => void;
+  // Ref to timecode span for direct DOM text update during playback
+  timecodeDomRef?: React.RefObject<HTMLSpanElement | null>;
 }
 
 // ─── Icon helpers ─────────────────────────────────────────────
@@ -108,6 +113,9 @@ export function Timeline({
   markers,
   projectId,
   onMarkersChange,
+  playheadDomRef,
+  onPpsChange,
+  timecodeDomRef,
 }: TimelineProps) {
   const { setNodeRef: setVideoDropRef, isOver: isVideoOver } = useDroppable({ id: 'timeline-droppable' });
   const { setNodeRef: setAudioDropRef, isOver: isAudioOver } = useDroppable({ id: 'timeline-audio-droppable' });
@@ -162,9 +170,10 @@ export function Timeline({
         const diffPx = playheadSeconds * (clamped - oldPps);
         tracksRef.current.scrollLeft += diffPx;
       }
+      onPpsChange?.(clamped);
       return clamped;
     });
-  }, [playheadSeconds]);
+  }, [playheadSeconds, onPpsChange]);
 
   // ── Grouped clips by track ───────────────────────────────
   const videoClips   = useMemo(() => clips.filter(c => !c.track_type || c.track_type === 'video'), [clips]);
@@ -559,7 +568,7 @@ export function Timeline({
             onChange={e => handleZoom(sliderToZoom(Number(e.target.value)))} className="tl-zoom-slider" title="Zoom" />
           <button className="tl-btn" title="Zoom in (+)" onClick={() => handleZoom(p => p * 1.33)}><ZoomInIcon /></button>
           <div className="tl-divider" />
-          <span className="tl-timecode">{fmt(playheadSeconds)} / {fmt(videoDuration)}</span>
+          <span className="tl-timecode" ref={timecodeDomRef as React.RefObject<HTMLSpanElement>}>{fmt(playheadSeconds)} / {fmt(videoDuration)}</span>
         </div>
       </div>
 
@@ -637,6 +646,7 @@ export function Timeline({
             {/* ── Playhead line (spans all tracks) ──────── */}
             <div
               className="playhead-line"
+              ref={playheadDomRef as React.RefObject<HTMLDivElement>}
               style={{ left: playheadX }}
             >
               <div
