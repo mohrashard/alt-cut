@@ -3,6 +3,7 @@ import {
 } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import type { TimelineClip, Marker } from '../lib/db';
+import { TimelinePlayhead } from './TimelinePlayhead';
 
 // ─── Constants ────────────────────────────────────────────────
 const DEFAULT_PPS       = 80;        // pixels per second (default zoom)
@@ -156,6 +157,38 @@ export function Timeline({
 
   const tracksRef   = useRef<HTMLDivElement>(null);
   const isDraggingPlayhead = useRef(false);
+  const mouseXRef   = useRef(0);
+
+  // ── Edge Auto-scroll ─────────────────────────────────────
+  // Only re-attach when the dragging SESSION starts/stops, not on every position update
+  const isAnyDragging = isDraggingPlayhead.current || trimState !== null || dragClip !== null;
+  const isAnyDraggingRef = useRef(isAnyDragging);
+  isAnyDraggingRef.current = isAnyDragging;
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => { mouseXRef.current = e.clientX; };
+    window.addEventListener('mousemove', onMouseMove);
+    let raf: number;
+    const loop = () => {
+      if (isAnyDraggingRef.current && tracksRef.current) {
+        const rect = tracksRef.current.getBoundingClientRect();
+        const x = mouseXRef.current - rect.left;
+        const edge = 60;
+        const speed = 12;
+        if (x < edge) {
+          tracksRef.current.scrollLeft -= speed * (1 - Math.max(0, x) / edge);
+        } else if (x > rect.width - edge) {
+          tracksRef.current.scrollLeft += speed * (1 - Math.max(0, rect.width - x) / edge);
+        }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      cancelAnimationFrame(raf);
+    };
+  }, []); // mount once — reads live values via refs
 
   const totalDur   = Math.max(videoDuration, 10);
   const totalWidth = totalDur * pps + 400; // extra padding
@@ -202,29 +235,6 @@ export function Timeline({
     return rawSec;
   }, [magnetOn, snapTargets, pps]);
 
-  // ── Playhead drag ────────────────────────────────────────
-  const onPlayheadMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    isDraggingPlayhead.current = true;
-    document.addEventListener('mousemove', onPlayheadDrag);
-    document.addEventListener('mouseup', onPlayheadRelease, { once: true });
-  };
-
-  const onPlayheadDrag = useCallback((e: MouseEvent) => {
-    if (!isDraggingPlayhead.current || !tracksRef.current) return;
-    const rect  = tracksRef.current.getBoundingClientRect();
-    const scrollLeft = tracksRef.current.scrollLeft;
-    const rawPx  = e.clientX - rect.left + scrollLeft;
-    const rawSec = Math.max(0, Math.min(rawPx / pps, totalDur));
-    onPlayheadChange(snapSeconds(rawSec));
-  }, [pps, totalDur, snapSeconds, onPlayheadChange]);
-
-  const onPlayheadRelease = useCallback(() => {
-    isDraggingPlayhead.current = false;
-    setSnapGuideX(null);
-    document.removeEventListener('mousemove', onPlayheadDrag);
-  }, [onPlayheadDrag]);
-
   // ── Ruler click to seek ──────────────────────────────────
   const onRulerClick = (e: React.MouseEvent) => {
     if (!tracksRef.current) return;
@@ -240,7 +250,11 @@ export function Timeline({
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.15 : 0.87;
-      setPps(prev => Math.min(MAX_PPS, Math.max(MIN_PPS, prev * factor)));
+      setPps(prev => {
+        const next = Math.min(MAX_PPS, Math.max(MIN_PPS, prev * factor));
+        onPpsChange?.(next); // keep PreviewWindow RAF in sync
+        return next;
+      });
     }
   };
 
@@ -330,13 +344,12 @@ export function Timeline({
     setDragClip(prev => prev ? { ...prev, currentTimelineStart: snapped } : null);
   }, [dragClip, pps, snapSeconds]);
 
-  const onClipDragEnd = useCallback(async (e: MouseEvent) => {
+  const onClipDragEnd = useCallback(async (_e: MouseEvent) => {
     document.removeEventListener('mousemove', onClipDragging);
     if (!dragClip) return;
-    const deltaPx  = e.clientX - dragClip.startMouseX;
-    const deltaSec = deltaPx / pps;
-    const rawSec   = Math.max(0, dragClip.origTimelineStart + deltaSec);
-    const snapped  = snapSeconds(rawSec);
+    // Use currentTimelineStart tracked live — avoids stale position when
+    // auto-scroll shifted the viewport during the drag
+    const snapped = dragClip.currentTimelineStart;
 
     const db = await import('../lib/db');
     const clip = clips.find(c => c.id === dragClip.clipId);
@@ -462,10 +475,18 @@ export function Timeline({
       if (e.key === 'm' || e.key === 'M') handleAddMarker();
       if (e.key === '+' || e.key === '=') handleZoom(p => p * 1.25);
       if (e.key === '-') handleZoom(p => p * 0.8);
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        onPlayheadChange(Math.max(0, playheadSeconds - 1 / 30));
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        onPlayheadChange(Math.min(videoDuration, playheadSeconds + 1 / 30));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedClipId, playheadSeconds, clips, onUndo, onRedo]);
+  }, [selectedClipId, playheadSeconds, clips, onUndo, onRedo, videoDuration, onPlayheadChange]);
 
   // ── Ruler ticks ──────────────────────────────────────────
   const { ticks } = getRulerTicks(pps, totalDur);
@@ -643,17 +664,21 @@ export function Timeline({
               ))}
             </div>
 
-            {/* ── Playhead line (spans all tracks) ──────── */}
-            <div
-              className="playhead-line"
-              ref={playheadDomRef as React.RefObject<HTMLDivElement>}
-              style={{ left: playheadX }}
-            >
-              <div
-                className="playhead-head"
-                onMouseDown={onPlayheadMouseDown}
+            {/* ── Playhead (fully ref-driven, never overwritten by React render) */}
+            {playheadDomRef && (
+              <TimelinePlayhead
+                initialLeftPx={playheadX}
+                onSeek={onPlayheadChange}
+                pps={pps}
+                totalDur={totalDur}
+                tracksScrollRef={tracksRef}
+                playheadRef={playheadDomRef}
+                onSnapGuide={setSnapGuideX}
+                snapTargets={snapTargets}
+                snapThresholdPx={SNAP_THRESHOLD_PX}
+                magnetOn={magnetOn}
               />
-            </div>
+            )}
 
             {/* ── Snap guide ────────────────────────────── */}
             {snapGuideX !== null && (
@@ -750,7 +775,7 @@ export function Timeline({
                   <button onClick={() => handleExtractAudio(clip.id)}>🎵 Extract Audio</button>
                 )}
                 {isVideo && (
-                  <button onClick={() => handleToggleMute(clip.id, clip.audio_enabled)}>
+                  <button onClick={() => handleToggleMute(clip.id, clip.audio_enabled ?? 1)}>
                     {isMuted ? '🔊 Unmute Audio' : '🔇 Mute Audio'}
                   </button>
                 )}
