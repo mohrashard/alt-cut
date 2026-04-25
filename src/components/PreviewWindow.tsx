@@ -43,8 +43,9 @@ export function PreviewWindow({
         const currentFrame = playerRef.current.getCurrentFrame();
         const sec = currentFrame / 30;
 
-        // 1. Move playhead line directly — no setState, no re-render
-        if (playheadDomRef?.current) {
+        // Only update the DOM position when the user is NOT actively dragging the handle.
+        // TimelinePlayhead sets data-playhead-dragging="true" during drag to signal this.
+        if (playheadDomRef?.current && !playheadDomRef.current.dataset.playheadDragging) {
           playheadDomRef.current.style.left = `${sec * pps}px`;
         }
 

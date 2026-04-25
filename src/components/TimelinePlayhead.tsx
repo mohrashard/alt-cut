@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 interface TimelinePlayheadProps {
   /** Initial pixel position — set once on mount, then the RAF loop takes over */
   initialLeftPx: number;
-  /** Called when user drags or clicks ruler — this updates React state for seeking */
+  /** Called when user finishes a drag or presses arrow keys */
   onSeek: (sec: number) => void;
   /** Current pps so drag can compute seconds from pixels */
   pps: number;
@@ -18,6 +18,10 @@ interface TimelinePlayheadProps {
   snapTargets?: number[];
   snapThresholdPx?: number;
   magnetOn?: boolean;
+  /** Project frames per second used for accurate keyboard seeking */
+  fps?: number;
+  /** Current time in seconds — used for aria-valuenow */
+  currentTimeSec?: number;
 }
 
 export function TimelinePlayhead({
@@ -31,88 +35,122 @@ export function TimelinePlayhead({
   snapTargets = [],
   snapThresholdPx = 10,
   magnetOn = true,
+  fps = 30,
+  currentTimeSec = 0,
 }: TimelinePlayheadProps) {
-  const isDragging = useRef(false);
-  // Keep pps/totalDur/snapTargets in refs so drag callbacks never go stale
-  const ppsRef          = useRef(pps);
-  const totalDurRef     = useRef(totalDur);
-  const snapTargetsRef  = useRef(snapTargets);
-  const magnetRef       = useRef(magnetOn);
+  // All mutable values live in refs — zero stale-closure risk in DOM callbacks
+  const isDragging       = useRef(false);
+  const ppsRef           = useRef(pps);
+  const totalDurRef      = useRef(totalDur);
+  const snapTargetsRef   = useRef(snapTargets);
+  const magnetRef        = useRef(magnetOn);
+  const fpsRef           = useRef(fps);
+  const headRef          = useRef<HTMLButtonElement>(null);
 
+  // Keep refs in sync every render (safe, synchronous)
   ppsRef.current         = pps;
   totalDurRef.current    = totalDur;
   snapTargetsRef.current = snapTargets;
   magnetRef.current      = magnetOn;
+  fpsRef.current         = fps;
 
-  // Set initial position once on mount — after that, only RAF / drag touch it
+  // ── Set initial position & Dynamic Height ─────────────────────
   useEffect(() => {
     if (playheadRef.current) {
       playheadRef.current.style.left = `${initialLeftPx}px`;
     }
-    // intentionally no deps — run once only
+
+    const updateHeight = () => {
+      if (tracksScrollRef.current && playheadRef.current) {
+        // Height of the tracks scroll area (excluding horizontal scrollbar if any)
+        const totalHeight = tracksScrollRef.current.clientHeight;
+        playheadRef.current.style.height = `${totalHeight}px`;
+      }
+    };
+
+    updateHeight();
+    const ro = new ResizeObserver(updateHeight);
+    if (tracksScrollRef.current) ro.observe(tracksScrollRef.current);
+
+    return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Snap helper ──────────────────────────────────────────────
   const snapPx = (rawPx: number): number => {
-    if (!magnetRef.current) return rawPx;
+    if (!magnetRef.current) {
+      headRef.current?.classList.remove('is-snapping');
+      onSnapGuide?.(null);
+      return rawPx;
+    }
     for (const t of snapTargetsRef.current) {
       const targetPx = t * ppsRef.current;
       if (Math.abs(rawPx - targetPx) <= snapThresholdPx) {
         onSnapGuide?.(targetPx);
+        headRef.current?.classList.add('is-snapping');
         return targetPx;
       }
     }
     onSnapGuide?.(null);
+    headRef.current?.classList.remove('is-snapping');
     return rawPx;
   };
 
+  // ── Drag handlers (attached to document, only when dragging) ──
   const onMouseMove = (e: MouseEvent) => {
     if (!isDragging.current || !tracksScrollRef.current || !playheadRef.current) return;
-    const rect = tracksScrollRef.current.getBoundingClientRect();
-    const rawPx = e.clientX - rect.left + tracksScrollRef.current.scrollLeft;
-    const clampedPx = Math.max(0, Math.min(rawPx, totalDurRef.current * ppsRef.current));
-    const snappedPx = snapPx(clampedPx);
-    // Move playhead DOM directly — no React state during drag
-    playheadRef.current.style.left = `${snappedPx}px`;
+    const rect     = tracksScrollRef.current.getBoundingClientRect();
+    const rawPx    = e.clientX - rect.left + tracksScrollRef.current.scrollLeft;
+    const clamped  = Math.max(0, Math.min(rawPx, totalDurRef.current * ppsRef.current));
+    
+    // Snapping to targets (clips/markers)
+    const snappedTargetPx = snapPx(clamped);
+    
+    // Snapping to frames (Rule #3: Frame Accuracy)
+    const sec = snappedTargetPx / ppsRef.current;
+    const frame = Math.floor(sec * fpsRef.current);
+    const frameSec = frame / fpsRef.current;
+    
+    playheadRef.current.style.left = `${frameSec * ppsRef.current}px`;
   };
 
-  const onMouseUp = (e: MouseEvent) => {
+  const onMouseUp = (_e: MouseEvent) => {
     if (!isDragging.current) return;
     isDragging.current = false;
+    playheadRef.current?.removeAttribute('data-playhead-dragging');
+    headRef.current?.classList.remove('is-snapping');
     document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
+    document.removeEventListener('mouseup',   onMouseUp);
     onSnapGuide?.(null);
 
-    // Commit the final position to React state (triggers player seek)
-    if (tracksScrollRef.current) {
-      const rect = tracksScrollRef.current.getBoundingClientRect();
-      const rawPx = e.clientX - rect.left + tracksScrollRef.current.scrollLeft;
-      const clampedPx = Math.max(0, Math.min(rawPx, totalDurRef.current * ppsRef.current));
-      const snappedPx = snapPx(clampedPx);
-      onSeek(snappedPx / ppsRef.current);
-    }
+    if (!tracksScrollRef.current || !playheadRef.current) return;
+    
+    const curPx = parseFloat(playheadRef.current.style.left);
+    onSeek(curPx / ppsRef.current);
   };
 
+  // ── Only start dragging when user clicks the drag handle ──────
   const onHeadMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     isDragging.current = true;
+    // Signal to PreviewWindow RAF to back off during drag
+    playheadRef.current?.setAttribute('data-playhead-dragging', 'true');
     document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('mouseup',   onMouseUp);
   };
 
+  // ── Keyboard frame stepping ──────────────────────────────────
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
-    const direction = e.key === 'ArrowRight' ? 1 : -1;
-    const frameSec = 1 / 30;
     if (!playheadRef.current) return;
-    // Read current pixel position directly from DOM
-    const curPx = parseFloat(playheadRef.current.style.left ?? '0');
-    const curSec = curPx / ppsRef.current;
-    const nextSec = Math.max(0, Math.min(totalDurRef.current, curSec + direction * frameSec));
-    // Update DOM immediately for instant feedback
+    const direction = e.key === 'ArrowRight' ? 1 : -1;
+    const frameSec  = 1 / fpsRef.current;
+    const curPx     = parseFloat(playheadRef.current.style.left ?? '0');
+    const curSec    = curPx / ppsRef.current;
+    const nextSec   = Math.max(0, Math.min(totalDurRef.current, curSec + direction * frameSec));
     playheadRef.current.style.left = `${nextSec * ppsRef.current}px`;
-    // Commit to React state → triggers player seek
     onSeek(nextSec);
   };
 
@@ -123,13 +161,15 @@ export function TimelinePlayhead({
       aria-label="Timeline playhead"
       aria-valuemin={0}
       aria-valuemax={totalDur}
+      aria-valuenow={currentTimeSec}
       tabIndex={0}
       className="playhead-line"
-      // NO style.left here — position is 100% DOM-controlled
       onKeyDown={onKeyDown}
     >
-      {/* Drag handle — the triangle/circle at top */}
-      <div
+      {/* Drag handle (pentagon at top) — semantic button for accessibility */}
+      <button
+        type="button"
+        ref={headRef}
         className="playhead-head"
         onMouseDown={onHeadMouseDown}
         aria-label="Drag playhead"

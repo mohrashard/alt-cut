@@ -155,25 +155,32 @@ export function Timeline({
     currentTimelineStart: number;
   } | null>(null);
 
-  const tracksRef   = useRef<HTMLDivElement>(null);
-  const isDraggingPlayhead = useRef(false);
-  const mouseXRef   = useRef(0);
-
-  // ── Edge Auto-scroll ─────────────────────────────────────
-  // Only re-attach when the dragging SESSION starts/stops, not on every position update
-  const isAnyDragging = isDraggingPlayhead.current || trimState !== null || dragClip !== null;
-  const isAnyDraggingRef = useRef(isAnyDragging);
-  isAnyDraggingRef.current = isAnyDragging;
+  const tracksRef      = useRef<HTMLDivElement>(null);
+  const mouseXRef      = useRef(0);
+  const isAnyDragging = trimState !== null || dragClip !== null;
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => { mouseXRef.current = e.clientX; };
     window.addEventListener('mousemove', onMouseMove);
+    return () => window.removeEventListener('mousemove', onMouseMove);
+  }, []);
+
+  // Edge auto-scroll — only runs an RAF loop while a drag is active
+  // Global safety net — clears stuck snap guide if mouse is released outside the window
+  useEffect(() => {
+    const clearSnap = () => setSnapGuideX(null);
+    document.addEventListener('mouseup', clearSnap);
+    return () => document.removeEventListener('mouseup', clearSnap);
+  }, []);
+
+  useEffect(() => {
+    if (!isAnyDragging) return;
     let raf: number;
     const loop = () => {
-      if (isAnyDraggingRef.current && tracksRef.current) {
-        const rect = tracksRef.current.getBoundingClientRect();
-        const x = mouseXRef.current - rect.left;
-        const edge = 60;
+      if (tracksRef.current) {
+        const rect  = tracksRef.current.getBoundingClientRect();
+        const x     = mouseXRef.current - rect.left;
+        const edge  = 60;
         const speed = 12;
         if (x < edge) {
           tracksRef.current.scrollLeft -= speed * (1 - Math.max(0, x) / edge);
@@ -184,11 +191,8 @@ export function Timeline({
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      cancelAnimationFrame(raf);
-    };
-  }, []); // mount once — reads live values via refs
+    return () => cancelAnimationFrame(raf);
+  }, [isAnyDragging]);
 
   const totalDur   = Math.max(videoDuration, 10);
   const totalWidth = totalDur * pps + 400; // extra padding
@@ -235,13 +239,12 @@ export function Timeline({
     return rawSec;
   }, [magnetOn, snapTargets, pps]);
 
-  // ── Ruler click to seek ──────────────────────────────────
+  // ── Ruler click to seek (onClick = only real clicks, not mousemove) ──
   const onRulerClick = (e: React.MouseEvent) => {
     if (!tracksRef.current) return;
-    const rect = tracksRef.current.getBoundingClientRect();
-    const scrollLeft = tracksRef.current.scrollLeft;
-    const rawPx  = e.clientX - rect.left + scrollLeft;
-    const rawSec = Math.max(0, Math.min(rawPx / pps, totalDur));
+    const rect       = tracksRef.current.getBoundingClientRect();
+    const rawPx      = e.clientX - rect.left + tracksRef.current.scrollLeft;
+    const rawSec     = Math.max(0, Math.min(rawPx / pps, totalDur));
     onPlayheadChange(rawSec);
   };
 
@@ -641,11 +644,11 @@ export function Timeline({
           {/* Inner scroll container */}
           <div style={{ width: totalWidth, position: 'relative', minHeight: '100%' }}>
 
-            {/* ── Ruler ──────────────────────────────────── */}
+            {/* ── Ruler (onClick so it only fires on real clicks, not hover) ── */}
             <div
               className="timeline-ruler"
               style={{ height: RULER_HEIGHT, width: totalWidth }}
-              onMouseDown={onRulerClick}
+              onClick={onRulerClick}
             >
               {ticks.filter(t => t.major).map(({ t, label }) => (
                 <div key={`maj-${t}`} className="ruler-tick" style={{ left: t * pps }}>
@@ -677,6 +680,7 @@ export function Timeline({
                 snapTargets={snapTargets}
                 snapThresholdPx={SNAP_THRESHOLD_PX}
                 magnetOn={magnetOn}
+                currentTimeSec={playheadSeconds}
               />
             )}
 
