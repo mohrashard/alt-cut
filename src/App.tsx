@@ -84,9 +84,9 @@ const TOOLBAR_TABS = [
 // ─── App ─────────────────────────────────────────────────────
 function App() {
   const [isRendering, setIsRendering] = useState(false);
-  const [activeMedia, setActiveMedia] = useState<string | null>(null);
   const [features, setFeatures] = useState<AppFeatures | null>(null);
   const [activeToolTab, setActiveToolTab] = useState('media');
+  const [playheadSeconds, setPlayheadSeconds] = useState(0);
 
   const [currentProject, setCurrentProject] = useState<any>(null);
   const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
@@ -103,6 +103,7 @@ function App() {
   useEffect(() => {
     import('./lib/db').then(async (db) => {
       try {
+        await db.runMigrations();          // ensure track_type, track_lane columns exist
         const project = await db.ensureDefaultProject();
         setCurrentProject(project);
         loadTimeline(project.id);
@@ -112,19 +113,26 @@ function App() {
     });
   }, []);
 
-  const handleMediaAdded = (filePath: string) => setActiveMedia(filePath);
-  const handleMediaSelected = (path: string) => setActiveMedia(path);
+  const handleMediaAdded = (_filePath: string) => { /* no-op */ };
+  const handleMediaSelected = (_path: string) => { /* no-op */ };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    if (over?.id === 'timeline-droppable' && currentProject) {
-      if (active.data.current?.type === 'Asset') {
-        const asset = active.data.current.asset;
-        const db = await import('./lib/db');
-        const dur = asset.duration > 0 ? asset.duration : 1.0;
-        await db.addClipToTimeline(currentProject.id, asset.id, dur);
-        await loadTimeline(currentProject.id);
+    if (!currentProject) return;
+
+    if (active.data.current?.type === 'Asset') {
+      const asset = active.data.current.asset;
+      const db = await import('./lib/db');
+      const dur = asset.duration > 0 ? asset.duration : 1.0;
+
+      // Determine which track it was dropped on
+      if (over?.id === 'timeline-audio-droppable') {
+        await db.addClipToTimeline(currentProject.id, asset.id, dur, 'audio', 0);
+      } else if (over?.id === 'timeline-droppable') {
+        const trackType = asset.type === 'audio' ? 'audio' : 'video';
+        await db.addClipToTimeline(currentProject.id, asset.id, dur, trackType, 0);
       }
+      await loadTimeline(currentProject.id);
     }
   };
 
@@ -138,13 +146,28 @@ function App() {
       alert("❌ Run 'npm run tauri dev' to export.");
       return;
     }
-    if (!activeMedia) {
+    if (timelineClips.length === 0) {
       alert('⚠️ Add media to the timeline before exporting.');
       return;
     }
     setIsRendering(true);
     try {
-      await invoke('run_render_pipeline', { videoPath: activeMedia, features });
+      // Convert file paths to asset:// URLs for Remotion CLI if needed, 
+      // but actually Remotion CLI in Node can read local file paths natively!
+      // So we can just pass the clips as-is.
+      
+      const payload = {
+        clips: timelineClips,
+        fontFamily: features?.fontFamily || 'Arial',
+        animationStyle: features?.animationStyle || 'hormozi',
+        captionX: features?.captionX || 0,
+        captionY: features?.captionY || 80,
+        durationInFrames: Math.max(1, Math.round(videoDuration * 30))
+      };
+
+      const payloadString = JSON.stringify(payload);
+
+      await invoke('run_render_pipeline', { payloadJson: payloadString });
       alert('✅ Export Successful!');
     } catch (error) {
       alert(`❌ Export Failed: ${error}`);
@@ -191,6 +214,7 @@ function App() {
               clips={timelineClips}
               features={features}
               setFeatures={setFeatures}
+              playheadSeconds={playheadSeconds}
               videoDuration={videoDuration}
             />
 
@@ -199,7 +223,9 @@ function App() {
               clips={timelineClips}
               videoDuration={videoDuration}
               selectedClipId={selectedClipId}
+              playheadSeconds={playheadSeconds}
               onClipSelected={setSelectedClipId}
+              onPlayheadChange={setPlayheadSeconds}
               onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
             />
           </div>

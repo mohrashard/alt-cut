@@ -172,57 +172,36 @@ async fn update_asset_path(asset_id: i64, new_path: String) -> Result<(), String
 }
 
 // ──────────────────────────────────────────────────────────────
-// run_render_pipeline — full export (Python + Remotion)
+// run_render_pipeline — full export via Remotion
 // ──────────────────────────────────────────────────────────────
 #[tauri::command]
-async fn run_render_pipeline(video_path: String, features: Features) -> Result<String, String> {
+async fn run_render_pipeline(payload_json: String) -> Result<String, String> {
     use tokio::process::Command;
 
     let root = project_root();
-    let python = find_python(&root);
-    let script = root.join("ai_backend").join("caption_engine.py");
+    
+    // Write payload to render_props.json
+    let props_path = root.join("render_props.json");
+    if let Err(e) = std::fs::write(&props_path, &payload_json) {
+        return Err(format!("Failed to write render_props.json: {}", e));
+    }
 
-    let mut cmd = Command::new(&python);
-    cmd.env("PYTHONIOENCODING", "utf-8")
-        .current_dir(&root)
-        .arg(&script)
-        .arg(&video_path);
+    println!("🎬 Starting Remotion Export...");
 
-    if !features.auto_captions { cmd.arg("--skip-captions"); }
-    if !features.remove_silence { cmd.arg("--skip-silence"); }
+    let mut remotion = Command::new("cmd");
+    remotion.arg("/C").arg("npx").arg("remotion").arg("render")
+        .arg("src/remotion/index.ts").arg("CaptionsComp")
+        .arg("final_export.mp4")
+        .arg(format!("--props={}", props_path.display()))
+        .current_dir(&root);
 
-    let output = cmd.output().await.map_err(|e| e.to_string())?;
-
-    if output.status.success() {
-        let render_intent_path = root.join("render_intent.txt");
-        let mut final_video = std::fs::read_to_string(&render_intent_path)
-            .unwrap_or_else(|_| video_path.clone());
-        final_video = final_video.trim().replace('\\', "/");
-
-        if !final_video.starts_with("file://") && !final_video.starts_with("asset://") {
-            final_video = format!("file:///{}", final_video);
-        }
-
-        let props_json = format!(
-            r#"{{"videoSrc": "{}", "fontFamily": "{}", "animationStyle": "{}"}}"#,
-            final_video, features.font_family, features.animation_style
-        );
-
-        let mut remotion = Command::new("cmd");
-        remotion.arg("/C").arg("npx").arg("remotion").arg("render")
-            .arg("src/remotion/index.ts").arg("CaptionsComp")
-            .arg("final_export.mp4")
-            .arg(format!("--props={}", props_json))
-            .current_dir(&root);
-
-        let ro = remotion.output().await.map_err(|e| e.to_string())?;
-        if ro.status.success() {
-            Ok("Export complete: final_export.mp4".to_string())
-        } else {
-            Err(format!("Remotion error: {}", String::from_utf8_lossy(&ro.stderr)))
-        }
+    let ro = remotion.output().await.map_err(|e| e.to_string())?;
+    
+    if ro.status.success() {
+        println!("✅ Export complete: final_export.mp4");
+        Ok("Export complete: final_export.mp4".to_string())
     } else {
-        Err(format!("Python error: {}", String::from_utf8_lossy(&output.stderr)))
+        Err(format!("Remotion error: {}", String::from_utf8_lossy(&ro.stderr)))
     }
 }
 

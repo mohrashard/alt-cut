@@ -110,7 +110,24 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
 
         // Store in DB
         await db.upsertAiMetadata(clipId, step, 'completed', rawJson);
-        setLog(prev => prev + `\n📝 ${parsed.chunks.length} caption chunks saved.`);
+        
+        // Auto-populate text track
+        for (const chunk of parsed.chunks) {
+          if (!chunk.text) continue;
+          // Create dummy asset for text, storing the entire chunk JSON for word-level highlighting
+          const chunkJson = JSON.stringify(chunk);
+          const asset = await db.addAsset(selectedClip.project_id, `text://${chunkJson}`, 'text', chunk.end - chunk.start);
+          await db.addClipToTimelineSpecific(
+            selectedClip.project_id,
+            asset.id,
+            chunk.end - chunk.start,
+            'text',
+            0,
+            selectedClip.timeline_start + chunk.start
+          );
+        }
+
+        setLog(prev => prev + `\n📝 ${parsed.chunks.length} caption chunks added to text track.`);
 
       } else if (step === 'denoise') {
         // Update the asset's file_path so the preview uses the clean video
