@@ -18,7 +18,7 @@ import { TimelineTrackLabels } from './timeline-track';
 import { ClipContextMenu, MarkerContextMenu } from './timeline-context-menu';
 
 export function Timeline({
-  clips, videoDuration, selectedClipId, playheadSeconds,
+  clips, videoDuration, selectedClipIds, playheadSeconds,
   onClipSelected, onPlayheadChange, onTimelineChange, onBeforeChange,
   canUndo, canRedo, onUndo, onRedo,
   markers, projectId, onMarkersChange,
@@ -41,15 +41,15 @@ export function Timeline({
   });
 
   const [trimState, setTrimState] = useState<{
-    clipId: number; edge: 'left' | 'right';
-    startMouseX: number; origStart: number; origEnd: number;
-    origTimelineStart: number; currentStart: number;
-    currentEnd: number; currentTimelineStart: number;
+    clipId: number; edge: 'left' | 'right'; startMouseX: number;
+    origStart: number; origEnd: number; origTimelineStart: number;
+    currentStart: number; currentEnd: number; currentTimelineStart: number;
   } | null>(null);
-
+  
   const [dragClip, setDragClip] = useState<{
-    clipId: number; startMouseX: number;
-    origTimelineStart: number; currentTimelineStart: number;
+    clipIds: number[];
+    startMouseX: number;
+    offsets: Record<number, { origTimelineStart: number; currentTimelineStart: number }>;
   } | null>(null);
 
   const tracksRef     = useRef<HTMLDivElement>(null);
@@ -196,37 +196,67 @@ export function Timeline({
 
   const onClipDragStart = (e: React.MouseEvent, clip: TimelineClip) => {
     e.stopPropagation();
-    setDragClip({ clipId: clip.id, startMouseX: e.clientX, origTimelineStart: clip.timeline_start, currentTimelineStart: clip.timeline_start });
+    // ── MULTI-SELECT GUARD ──────────────────────────────────────────────────
+    // If Shift is held, the user is trying to ADD this clip to the selection,
+    // not drag it. Return early so the onClick handler fires and handles the
+    // shift-click correctly. Without this, onClipDragStart would clear the
+    // selection BEFORE onClick could toggle the clip in.
+    if (e.shiftKey) return;
+
+    const idsToDrag = selectedClipIds.includes(clip.id) ? selectedClipIds : [clip.id];
+    if (!selectedClipIds.includes(clip.id)) onClipSelected([clip.id]);
+
+    const offsets: Record<number, any> = {};
+    for (const id of idsToDrag) {
+      const c = clips.find(x => x.id === id);
+      if (c) offsets[id] = { origTimelineStart: c.timeline_start, currentTimelineStart: c.timeline_start };
+    }
+    setDragClip({ clipIds: idsToDrag, startMouseX: e.clientX, offsets });
   };
 
   const onClipDragging = useCallback(async (e: MouseEvent) => {
     if (!dragClip) return;
     const deltaPx  = e.clientX - dragClip.startMouseX;
-    const deltaSec = deltaPx / pps;
-    const rawSec   = Math.max(0, dragClip.origTimelineStart + deltaSec);
-    const snapped  = snapSeconds(rawSec);
-    setDragClip(prev => prev ? { ...prev, currentTimelineStart: snapped } : null);
+    let deltaSec = deltaPx / pps;
+
+    // Clamp so no clip goes below 0
+    let minOrig = Infinity;
+    for (const id of dragClip.clipIds) {
+      const orig = dragClip.offsets[id].origTimelineStart;
+      if (orig < minOrig) minOrig = orig;
+    }
+    if (minOrig + deltaSec < 0) deltaSec = -minOrig;
+
+    // Snap based on the primary clicked clip (the first one in the list)
+    const firstId = dragClip.clipIds[0];
+    const rawFirst = dragClip.offsets[firstId].origTimelineStart + deltaSec;
+    const snappedFirst = snapSeconds(rawFirst);
+    const finalDelta = snappedFirst - dragClip.offsets[firstId].origTimelineStart;
+
+    setDragClip(prev => {
+      if (!prev) return null;
+      const newOffsets = { ...prev.offsets };
+      for (const id of prev.clipIds) {
+        newOffsets[id] = { ...newOffsets[id], currentTimelineStart: newOffsets[id].origTimelineStart + finalDelta };
+      }
+      return { ...prev, offsets: newOffsets };
+    });
   }, [dragClip, pps, snapSeconds]);
 
   const onClipDragEnd = useCallback(async (_e: MouseEvent) => {
     if (!dragClip) return;
-    const snapped = dragClip.currentTimelineStart;
-    const db      = await import('../../lib/db');
-    const clip    = clips.find(c => c.id === dragClip.clipId);
-    if (clip) {
-      onBeforeChange();
-      await db.updateClipTime(clip.id, clip.start_time, clip.end_time, snapped);
+    onBeforeChange();
+    const db = await import('../../lib/db');
+    for (const id of dragClip.clipIds) {
+      const snapped = dragClip.offsets[id].currentTimelineStart;
+      const clip = clips.find(c => c.id === id);
+      if (clip) await db.updateClipTime(clip.id, clip.start_time, clip.end_time, snapped);
     }
     setDragClip(null);
     setSnapGuideX(null);
     onTimelineChange();
   }, [dragClip, clips, onTimelineChange, onBeforeChange]);
 
-  // ─── BUG FIX: Attach global drag listeners via useEffect ───────────────────
-  // We MUST attach mousemove/mouseup listeners here rather than inside the onMouseDown handlers.
-  // This prevents the "stale closure" bug where the mouseup handler is bound to the
-  // initial `null` state, causing it to return early and leave the app in a permanent
-  // dragging state (which triggers infinite edge auto-scrolling).
   useEffect(() => {
     if (trimState) {
       document.addEventListener('mousemove', onTrimDrag);
@@ -250,53 +280,63 @@ export function Timeline({
   }, [dragClip, onClipDragging, onClipDragEnd]);
 
   const handleSplit = async () => {
-    if (selectedClipId === null) return;
-    const clip   = clips.find(c => c.id === selectedClipId);
-    if (!clip) return;
-    const dur    = clip.end_time - clip.start_time;
-    const localT = playheadSeconds - clip.timeline_start;
-    if (localT <= 0 || localT >= dur) { alert('Playhead must be inside the selected clip.'); return; }
+    if (selectedClipIds.length === 0) return;
     onBeforeChange();
     const db = await import('../../lib/db');
-    await db.splitClip(selectedClipId, playheadSeconds);
-    onClipSelected(null);
+    for (const id of selectedClipIds) {
+      const clip = clips.find(c => c.id === id);
+      if (!clip) continue;
+      const localT = playheadSeconds - clip.timeline_start;
+      if (localT > 0 && localT < (clip.end_time - clip.start_time)) {
+        await db.splitClip(id, playheadSeconds);
+      }
+    }
+    onClipSelected([]);
     onTimelineChange();
   };
 
-  const handleDelete = async (clipId?: number) => {
-    const id = clipId ?? selectedClipId;
-    if (id === null || id === undefined) return;
+  const handleDelete = async (overrideId?: number) => {
+    const idsToDelete = overrideId !== undefined ? [overrideId] : selectedClipIds;
+    if (idsToDelete.length === 0) return;
     onBeforeChange();
     const db = await import('../../lib/db');
-    await db.deleteTimelineClip(id);
-    onClipSelected(null);
+    for (const id of idsToDelete) {
+      await db.deleteTimelineClip(id);
+    }
+    onClipSelected([]);
     setContextMenu(null);
     onTimelineChange();
   };
 
   const handleDeleteLeft = async () => {
-    if (selectedClipId === null) return;
-    const clip   = clips.find(c => c.id === selectedClipId);
-    if (!clip) return;
-    const localT = playheadSeconds - clip.timeline_start;
-    const dur    = clip.end_time - clip.start_time;
-    if (localT <= 0 || localT >= dur) { alert('Playhead must be inside the selected clip.'); return; }
+    if (selectedClipIds.length === 0) return;
     onBeforeChange();
     const db = await import('../../lib/db');
-    await db.updateClipTime(clip.id, clip.start_time + localT, clip.end_time, playheadSeconds);
+    for (const id of selectedClipIds) {
+      const clip = clips.find(c => c.id === id);
+      if (!clip) continue;
+      const localT = playheadSeconds - clip.timeline_start;
+      const dur = clip.end_time - clip.start_time;
+      if (localT > 0 && localT < dur) {
+        await db.updateClipTime(clip.id, clip.start_time + localT, clip.end_time, playheadSeconds);
+      }
+    }
     onTimelineChange();
   };
 
   const handleDeleteRight = async () => {
-    if (selectedClipId === null) return;
-    const clip   = clips.find(c => c.id === selectedClipId);
-    if (!clip) return;
-    const localT = playheadSeconds - clip.timeline_start;
-    const dur    = clip.end_time - clip.start_time;
-    if (localT <= 0 || localT >= dur) { alert('Playhead must be inside the selected clip.'); return; }
+    if (selectedClipIds.length === 0) return;
     onBeforeChange();
     const db = await import('../../lib/db');
-    await db.updateClipTime(clip.id, clip.start_time, clip.start_time + localT, clip.timeline_start);
+    for (const id of selectedClipIds) {
+      const clip = clips.find(c => c.id === id);
+      if (!clip) continue;
+      const localT = playheadSeconds - clip.timeline_start;
+      const dur = clip.end_time - clip.start_time;
+      if (localT > 0 && localT < dur) {
+        await db.updateClipTime(clip.id, clip.start_time, clip.start_time + localT, clip.timeline_start);
+      }
+    }
     onTimelineChange();
   };
 
@@ -331,6 +371,10 @@ export function Timeline({
 
   const onClipRightClick = (e: React.MouseEvent, clipId: number) => {
     e.preventDefault();
+    e.stopPropagation();
+    if (!selectedClipIds.includes(clipId)) {
+      onClipSelected([clipId]);
+    }
     setContextMenu({ x: e.clientX, y: e.clientY, clipId });
   };
 
@@ -359,17 +403,45 @@ export function Timeline({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedClipId, playheadSeconds, clips, onUndo, onRedo, videoDuration, onPlayheadChange]);
+  }, [selectedClipIds, playheadSeconds, clips, onUndo, onRedo, videoDuration, onPlayheadChange]);
 
   const { ticks }   = getRulerTicks(pps, totalDur);
   const playheadX   = playheadSeconds * pps;
-  const selectedClip = clips.find(c => c.id === selectedClipId);
-  const canSplit = selectedClip
-    ? playheadSeconds > selectedClip.timeline_start &&
-      playheadSeconds < selectedClip.timeline_start + (selectedClip.end_time - selectedClip.start_time)
-    : false;
+  const selectedClips = clips.filter(c => selectedClipIds.includes(c.id));
+  const canDeleteL = selectedClips.some(c => playheadSeconds > c.timeline_start && playheadSeconds < c.timeline_start + (c.end_time - c.start_time));
+  const canSplit   = canDeleteL;
 
-  const elementProps = { pps, selectedClipId, trimState, dragClip, onClipSelected, onClipDragStart, onClipRightClick, onTrimMouseDown };
+  const handleClipClick = (e: React.MouseEvent, clipId: number) => {
+    e.stopPropagation();
+    if (e.shiftKey) {
+      if (selectedClipIds.includes(clipId)) {
+        onClipSelected(selectedClipIds.filter(id => id !== clipId));
+      } else {
+        onClipSelected([...selectedClipIds, clipId]);
+      }
+    } else {
+      onClipSelected([clipId]);
+    }
+  };
+
+  const handleEmptyTrackClick = () => { onClipSelected([]); setContextMenu(null); };
+
+  const elementProps = { pps, onClipSelected: handleClipClick, onClipDragStart, onClipRightClick, onTrimMouseDown, trimState };
+
+  const renderClip = (clip: TimelineClip) => {
+    const dragging = dragClip?.clipIds.includes(clip.id);
+    const mappedDragClip = dragging && dragClip ? { clipId: clip.id, currentTimelineStart: dragClip.offsets[clip.id].currentTimelineStart } : null;
+    return (
+      <TimelineElement 
+        key={clip.id} 
+        clip={clip} 
+        trackType={clip.track_type as any || 'video'} 
+        isSelected={selectedClipIds.includes(clip.id)}
+        dragClip={mappedDragClip}
+        {...elementProps} 
+      />
+    );
+  };
 
   return (
     <div className="timeline-section" onWheel={onWheel}>
@@ -377,7 +449,7 @@ export function Timeline({
       {/* ── Toolbar ─────────────────────────────────────── */}
       <TimelineToolbar
         canUndo={canUndo} canRedo={canRedo} canSplit={canSplit}
-        selectedClipId={selectedClipId} magnetOn={magnetOn}
+        selectedClipIds={selectedClipIds} magnetOn={magnetOn}
         pps={pps} playheadSeconds={playheadSeconds} videoDuration={videoDuration}
         timecodeDomRef={timecodeDomRef}
         onUndo={onUndo} onRedo={onRedo} onSplit={handleSplit}
@@ -402,7 +474,7 @@ export function Timeline({
         />
 
         {/* Scrollable tracks area */}
-        <div className="timeline-tracks" ref={tracksRef} onClick={() => onClipSelected(null)}>
+        <div className="timeline-tracks" ref={tracksRef} onClick={handleEmptyTrackClick}>
           {/* Inner scroll container */}
           <div style={{ width: totalWidth, position: 'relative', minHeight: '100%' }}>
 
@@ -438,7 +510,7 @@ export function Timeline({
             {/* ── Text track ── */}
             {textClips.length > 0 && (
               <div className="track-row text-track" style={{ height: TRACK_TEXT_H }}>
-                {textClips.map(c => <TimelineElement key={c.id} clip={c} trackType="text" {...elementProps} />)}
+                {textClips.map(renderClip)}
               </div>
             )}
 
@@ -458,7 +530,7 @@ export function Timeline({
                   <span>📦</span><span>Drag video here to start</span>
                 </div>
               )}
-              {videoClips.map(c => <TimelineElement key={c.id} clip={c} trackType="video" {...elementProps} />)}
+              {videoClips.map(renderClip)}
             </div>
 
             {/* ── Audio track ── */}
@@ -472,7 +544,7 @@ export function Timeline({
                   <span>🎵</span><span>Drag audio here</span>
                 </div>
               )}
-              {audioClips.map(c => <TimelineElement key={c.id} clip={c} trackType="audio" {...elementProps} />)}
+              {audioClips.map(renderClip)}
               {/* Audio shadow from video clips */}
               {videoClips.map(clip => {
                 if (clip.audio_enabled === 0) return null;
@@ -498,18 +570,27 @@ export function Timeline({
       {/* ── Clip context menu ── */}
       <ClipContextMenu
         contextMenu={contextMenu}
+        setContextMenu={setContextMenu}
         clips={clips}
+        selectedClipIds={selectedClipIds}
+        onClipSelected={onClipSelected}
         onExtractAudio={handleExtractAudio}
         onToggleMute={handleToggleMute}
-        onDuplicate={async (clip) => {
+        onDuplicate={async () => {
+          if (selectedClipIds.length === 0) return;
           onBeforeChange();
           const db = await import('../../lib/db');
-          await db.addClipToTimeline(clip.project_id, clip.asset_id,
-            clip.end_time - clip.start_time, clip.track_type || 'video', clip.track_lane ?? 0);
+          for (const id of selectedClipIds) {
+            const clip = clips.find(c => c.id === id);
+            if (clip) {
+              await db.addClipToTimeline(clip.project_id, clip.asset_id,
+                clip.end_time - clip.start_time, clip.track_type || 'video', clip.track_lane ?? 0);
+            }
+          }
           setContextMenu(null);
           onTimelineChange();
         }}
-        onDelete={(clipId) => handleDelete(clipId)}
+        onDelete={handleDelete}
         onSplit={handleSplit}
       />
 

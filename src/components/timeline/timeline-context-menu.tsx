@@ -11,11 +11,14 @@ const IcoSplit     = () => <svg width="12" height="12" viewBox="0 0 24 24" fill=
 // ─── Types ────────────────────────────────────────────────────
 interface ClipContextMenuProps {
   contextMenu: { x: number; y: number; clipId: number } | null;
+  setContextMenu: (v: null) => void;
   clips: TimelineClip[];
+  selectedClipIds: number[];
+  onClipSelected: (ids: number[]) => void;
   onExtractAudio: (clipId: number) => void;
   onToggleMute: (clipId: number, currentEnabled: number) => void;
-  onDuplicate: (clip: TimelineClip) => void;
-  onDelete: (clipId: number) => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
   onSplit: () => void;
 }
 
@@ -55,7 +58,8 @@ function CtxSeparator() {
 
 // ─── Clip context menu ─────────────────────────────────────────
 export function ClipContextMenu({
-  contextMenu, clips, onExtractAudio, onToggleMute, onDuplicate, onDelete, onSplit,
+  contextMenu, clips, selectedClipIds,
+  onExtractAudio, onToggleMute, onDuplicate, onDelete, onSplit,
 }: ClipContextMenuProps) {
   if (!contextMenu) return null;
   const clip = clips.find(c => c.id === contextMenu.clipId);
@@ -64,29 +68,32 @@ export function ClipContextMenu({
   const isVideo = clip.track_type === 'video';
   const isMuted = clip.audio_enabled === 0;
 
+  const count = selectedClipIds.length;
+  const isMulti = count > 1;
+
   return (
     <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
-      <CtxItem icon={<IcoSplit />}     label="Split at playhead" shortcut="S"
+      <CtxItem icon={<IcoSplit />}     label={isMulti ? `Split ${count} clips` : "Split at playhead"} shortcut="S"
         onClick={e => { e.stopPropagation(); onSplit(); }} />
-      <CtxItem icon={<IcoDuplicate />} label="Duplicate"          shortcut="D"
-        onClick={async e => { e.stopPropagation(); onDuplicate(clip); }} />
+      <CtxItem icon={<IcoDuplicate />} label={isMulti ? `Duplicate ${count} clips` : "Duplicate"}          shortcut="D"
+        onClick={async e => { e.stopPropagation(); onDuplicate(); }} />
 
-      {isVideo && <CtxSeparator />}
-      {isVideo && (
+      {!isMulti && isVideo && <CtxSeparator />}
+      {!isMulti && isVideo && (
         <CtxItem
           icon={isMuted ? <IcoUnmute /> : <IcoMute />}
           label={isMuted ? 'Unmute audio' : 'Mute audio'}
           onClick={e => { e.stopPropagation(); onToggleMute(clip.id, clip.audio_enabled ?? 1); }}
         />
       )}
-      {isVideo && (
+      {!isMulti && isVideo && (
         <CtxItem icon={<IcoExtract />} label="Extract audio"
           onClick={e => { e.stopPropagation(); onExtractAudio(clip.id); }} />
       )}
 
       <CtxSeparator />
-      <CtxItem icon={<IcoDelete />} label="Delete" shortcut="Del" danger
-        onClick={e => { e.stopPropagation(); onDelete(clip.id); }} />
+      <CtxItem icon={<IcoDelete />} label={isMulti ? `Delete ${count} clips` : "Delete"} shortcut="Del" danger
+        onClick={e => { e.stopPropagation(); onDelete(); }} />
     </div>
   );
 }

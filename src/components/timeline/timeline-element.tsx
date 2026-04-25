@@ -25,10 +25,10 @@ interface TimelineElementProps {
   clip: TimelineClip;
   trackType: 'video' | 'audio' | 'text';
   pps: number;
-  selectedClipId: number | null;
+  isSelected: boolean;
   trimState: TrimState | null;
   dragClip: DragClipState | null;
-  onClipSelected: (id: number | null) => void;
+  onClipSelected: (e: React.MouseEvent, id: number) => void;
   onClipDragStart: (e: React.MouseEvent, clip: TimelineClip) => void;
   onClipRightClick: (e: React.MouseEvent, clipId: number) => void;
   onTrimMouseDown: (e: React.MouseEvent, clip: TimelineClip, edge: 'left' | 'right') => void;
@@ -104,7 +104,7 @@ export function TimelineElement({
   clip,
   trackType,
   pps,
-  selectedClipId,
+  isSelected,
   trimState,
   dragClip,
   onClipSelected,
@@ -124,7 +124,7 @@ export function TimelineElement({
 
   const leftPx     = tStart * pps;
   const widthPx    = Math.max(dur * pps, 8);
-  const isSel      = clip.id === selectedClipId;
+  const isSel      = isSelected;
   const isBusy     = clip.ai_metadata?.['captions']?.status === 'processing' ||
                      clip.ai_metadata?.['denoise']?.status === 'processing';
   const isDragging = dragClip?.clipId === clip.id;
@@ -135,7 +135,7 @@ export function TimelineElement({
     <div
       className={`clip-block ${trackType} ${isSel ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isMuted ? 'muted' : ''}`}
       style={{ left: leftPx, width: widthPx, position: 'absolute', top: '50%', transform: 'translateY(-50%)' }}
-      onClick={(e) => { e.stopPropagation(); onClipSelected(isSel ? null : clip.id); }}
+      onClick={(e) => { e.stopPropagation(); onClipSelected(e, clip.id); }}
       onMouseDown={(e) => { if (e.button === 0) onClipDragStart(e, clip); }}
       onContextMenu={(e) => onClipRightClick(e, clip.id)}
       title={`${label}\n${fmt(clip.timeline_start)} → ${fmt(clip.timeline_start + dur)}`}

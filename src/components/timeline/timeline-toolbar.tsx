@@ -9,7 +9,7 @@ interface TimelineToolbarProps {
   canUndo: boolean;
   canRedo: boolean;
   canSplit: boolean;
-  selectedClipId: number | null;
+  selectedClipIds: number[];
   magnetOn: boolean;
   pps: number;
   playheadSeconds: number;
@@ -30,7 +30,7 @@ interface TimelineToolbarProps {
 }
 
 export function TimelineToolbar({
-  canUndo, canRedo, canSplit, selectedClipId, magnetOn, pps,
+  canUndo, canRedo, canSplit, selectedClipIds, magnetOn, pps,
   playheadSeconds, videoDuration, timecodeDomRef,
   onUndo, onRedo, onSplit, onDeleteLeft, onDeleteRight, onDelete,
   onAddMarker, onToggleMagnet, onZoomFit, onZoomOut, onZoomIn, onZoomSlider,
@@ -45,9 +45,9 @@ export function TimelineToolbar({
         <button className="tl-btn" title="Redo (Ctrl+Y)" disabled={!canRedo} onClick={onRedo}><RedoIcon /></button>
         <div className="tl-divider" />
         <button className="tl-btn" title="Split at playhead (S)" disabled={!canSplit} onClick={onSplit}><SplitIcon /></button>
-        <button className="tl-btn" title="Delete left part (Q)" disabled={selectedClipId === null} onClick={onDeleteLeft}><DeleteLeftIcon /></button>
-        <button className="tl-btn" title="Delete right part (W)" disabled={selectedClipId === null} onClick={onDeleteRight}><DeleteRightIcon /></button>
-        <button className="tl-btn" title="Delete selected (Delete)" disabled={selectedClipId === null} onClick={onDelete}><TrashIcon /></button>
+        <button className="tl-btn" title="Delete left part (Q)" disabled={selectedClipIds.length === 0} onClick={onDeleteLeft}><DeleteLeftIcon /></button>
+        <button className="tl-btn" title="Delete right part (W)" disabled={selectedClipIds.length === 0} onClick={onDeleteRight}><DeleteRightIcon /></button>
+        <button className="tl-btn" title="Delete selected (Delete)" disabled={selectedClipIds.length === 0} onClick={onDelete}><TrashIcon /></button>
         <div className="tl-divider" />
         <button className="tl-btn tl-btn-marker" title="Add marker (M)" onClick={onAddMarker}><MarkerIcon /></button>
       </div>

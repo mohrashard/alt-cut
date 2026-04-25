@@ -16,9 +16,9 @@ export interface TrackState { locked: boolean; hidden: boolean; muted: boolean; 
 export interface TimelineProps {
   clips: TimelineClip[];
   videoDuration: number;
-  selectedClipId: number | null;
+  selectedClipIds: number[];
   playheadSeconds: number;
-  onClipSelected: (id: number | null) => void;
+  onClipSelected: (ids: number[]) => void;
   onPlayheadChange: (t: number) => void;
   onTimelineChange: () => void;
   // Undo/Redo

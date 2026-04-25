@@ -97,7 +97,7 @@ function App() {
 
   const [currentProject, setCurrentProject] = useState<any>(null);
   const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
-  const [selectedClipId, setSelectedClipId] = useState<number | null>(null);
+  const [selectedClipIds, setSelectedClipIds] = useState<number[]>([]);
   const [markers, setMarkers] = useState<Marker[]>([]);
 
   // ── Undo/Redo history (ref-based to avoid re-render on push) ─
@@ -106,7 +106,8 @@ function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
-  const selectedClip = timelineClips.find(c => c.id === selectedClipId) || null;
+  const selectedClips = timelineClips.filter(c => selectedClipIds.includes(c.id));
+  const selectedClip = selectedClips.length === 1 ? selectedClips[0] : null;
 
   // Push current clips to the history stack before a mutation
   const pushHistory = useCallback((clips: TimelineClip[]) => {
@@ -284,9 +285,9 @@ function App() {
             <Timeline
               clips={timelineClips}
               videoDuration={videoDuration}
-              selectedClipId={selectedClipId}
+              selectedClipIds={selectedClipIds}
+              onClipSelected={setSelectedClipIds}
               playheadSeconds={playheadSeconds}
-              onClipSelected={setSelectedClipId}
               onPlayheadChange={setPlayheadSeconds}
               onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
               onBeforeChange={() => pushHistory(timelineClips)}
