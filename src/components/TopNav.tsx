@@ -1,6 +1,7 @@
 interface TopNavProps {
   isRendering: boolean;
   onExport: () => void;
+  onClearTimeline?: () => void;
 }
 
 const WindowIcon = () => (
@@ -22,8 +23,14 @@ const UploadIcon = () => (
     <line x1="12" y1="3" x2="12" y2="15"/>
   </svg>
 );
+const TrashIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+  </svg>
+);
 
-export function TopNav({ isRendering, onExport }: TopNavProps) {
+export function TopNav({ isRendering, onExport, onClearTimeline }: TopNavProps) {
   return (
     <div className="topnav">
       <div className="topnav-left">
@@ -34,6 +41,12 @@ export function TopNav({ isRendering, onExport }: TopNavProps) {
         <div className="topnav-menu">
           <button className="menu-btn">Menu ▾</button>
         </div>
+        {onClearTimeline && (
+          <button className="btn-icon btn-icon-ghost" onClick={onClearTimeline}>
+            <TrashIcon />
+            Clear
+          </button>
+        )}
         <div className="topnav-title">Untitled Project</div>
       </div>
 

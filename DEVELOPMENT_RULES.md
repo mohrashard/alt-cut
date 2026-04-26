@@ -17,6 +17,7 @@ To ensure project stability and prevent regression when adding new features, fol
 - **Tauri Asset Protocol**: Always wrap local file paths with `convertFileSrc()` before passing them to the Remotion `<Player>` or `<Video>` components.
 - **Frame Accuracy**: Remotion uses `fps`. When calculating time, always use the formula: `frame = Math.floor(seconds * fps)`.
 - **Absolute Positioning**: The timeline uses absolute positioning. Any new track or clip type must respect the `timeline_start` and `duration` offsets calculated in `db.ts`.
+- **Thumbnail Queuing**: Use a centralized queue (e.g. `ThumbnailProcessor`) for extracting video thumbnails instead of rendering per-component. This prevents CPU spikes, avoids reloading videos continuously, and manages memory using Blob object URLs and `URL.revokeObjectURL()`.
 
 ## 4. UI/UX Consistency
 - **Grid Layout**: Maintain the `app-shell` grid defined in `App.css`. Do not use ad-hoc floats or absolute positioning for main panels.

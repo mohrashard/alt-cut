@@ -17,11 +17,13 @@ interface PreviewWindowProps {
   // Ref to the timecode span for zero-re-render text updates
   timecodeDomRef?: React.RefObject<HTMLSpanElement | null>;
   pps?: number;
+  engineTimeRef?: React.MutableRefObject<number>;
 }
 
 export function PreviewWindow({
   clips, features, setFeatures, videoDuration = 0, playheadSeconds = 0,
-  onPlayheadChange, playheadDomRef, timecodeDomRef, pps = 80
+  onPlayheadChange, playheadDomRef, timecodeDomRef, pps = 80,
+  engineTimeRef
 }: PreviewWindowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef    = useRef<PlayerRef>(null);
@@ -42,6 +44,10 @@ export function PreviewWindow({
       if (playerRef.current) {
         const currentFrame = playerRef.current.getCurrentFrame();
         const sec = currentFrame / 30;
+        
+        if (engineTimeRef) {
+          engineTimeRef.current = sec;
+        }
 
         // Only update the DOM position when the user is NOT actively dragging the handle.
         // TimelinePlayhead sets data-playhead-dragging="true" during drag to signal this.

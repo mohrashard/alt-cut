@@ -1,0 +1,210 @@
+Searched for "marker"
+Viewed index.tsx:1-800
+Viewed db.ts:1-508
+Viewed timeline-toolbar.tsx:1-403
+Viewed constants.ts:1-45
+Viewed App.tsx:1-346
+
+Here is the code related to adding markers, pulled directly from each of the files you specified without any edits:
+
+### `src/components/timeline/index.tsx`
+```tsx
+  // ── Add Marker ────────────────────────────────────────────────
+  const handleAddMarker = async () => {
+    if (!projectId) {
+      console.warn('handleAddMarker: no projectId');
+      return;
+    }
+
+    // Grab the time directly from the source of truth (the Ref), not the React State.
+    const realTimePlayhead = engineTimeRef?.current ?? playheadSeconds; 
+
+    if (
+      typeof realTimePlayhead !== 'number' ||
+      isNaN(realTimePlayhead) ||
+      realTimePlayhead < 0
+    ) {
+      console.warn('handleAddMarker: invalid playhead', realTimePlayhead);
+      return;
+    }
+
+    try {
+      const db = await import('../../lib/db');
+      
+      // Optimistic UI Update (CapCut style): 
+      // If you want it to feel instantaneous, trigger a local state update for the UI right here
+      // before waiting for the database to finish saving.
+      
+      // Save to database
+      await db.addMarker(projectId, realTimePlayhead);
+      
+      // Refresh your UI state
+      onMarkersChange();
+    } catch (err) {
+      console.error('handleAddMarker: failed to add marker', err);
+    }
+  };
+
+  // ... further down in the keyboard shortcuts ...
+  if (e.key === 'm' || e.key === 'M') handleAddMarker();
+```
+
+### `src/components/timeline/constants.ts`
+```typescript
+import type { TimelineClip, Marker } from '../../lib/db';
+
+export interface TimelineProps {
+  // ... other props ...
+
+  // Markers
+  markers: Marker[];
+  projectId: number | null;
+  onMarkersChange: () => void;
+```
+
+### `src/lib/db.ts`
+```typescript
+export interface Marker {
+  id: number;
+  project_id: number;
+  time_seconds: number;
+  label: string;
+  color: string;
+}
+
+// ─── Markers ──────────────────────────────────────────────────
+
+export async function addMarker(
+  projectId: number
+
+[ignoring loop detection]
+Here is the exact code related to adding markers, pulled directly from each of the files you specified:
+
+**`c:\Users\User\alt-cut\src\components\timeline\index.tsx`**
+```tsx
+  // ── Add Marker ────────────────────────────────────────────────
+  const handleAddMarker = async () => {
+    if (!projectId) {
+      console.warn('handleAddMarker: no projectId');
+      return;
+    }
+
+    // Grab the time directly from the source of truth (the Ref), not the React State.
+    const realTimePlayhead = engineTimeRef?.current ?? playheadSeconds; 
+
+    if (
+      typeof realTimePlayhead !== 'number' ||
+      isNaN(realTimePlayhead) ||
+      realTimePlayhead < 0
+    ) {
+      console.warn('handleAddMarker: invalid playhead', realTimePlayhead);
+      return;
+    }
+
+    try {
+      const db = await import('../../lib/db');
+      
+      // Optimistic UI Update (CapCut style): 
+      // If you want it to feel instantaneous, trigger a local state update for the UI right here
+      // before waiting for the database to finish saving.
+      
+      // Save to database
+      await db.addMarker(projectId, realTimePlayhead);
+      
+      // Refresh your UI state
+      onMarkersChange();
+    } catch (err) {
+      console.error('handleAddMarker: failed to add marker', err);
+    }
+  };
+
+      // In the keyboard shortcuts effect:
+      if (e.key === 'm' || e.key === 'M') handleAddMarker();
+
+      // Passing to Toolbar:
+      <TimelineToolbar
+        onAddMarker={handleAddMarker}
+      />
+```
+
+**`c:\Users\User\alt-cut\src\components\timeline\constants.ts`**
+```typescript
+import type { TimelineClip, Marker } from '../../lib/db';
+
+export interface TimelineProps {
+  // Markers
+  markers: Marker[];
+  projectId: number | null;
+  onMarkersChange: () => void;
+```
+
+**`c:\Users\User\alt-cut\src\lib\db.ts`**
+```typescript
+export interface Marker {
+  id: number;
+  project_id: number;
+  time_seconds: number;
+  label: string;
+  color: string;
+}
+
+// ─── Markers ──────────────────────────────────────────────────
+
+export async function addMarker(
+  projectId: number,
+  timeSeconds: number,
+  label = '',
+  color = '#ffcc00'
+): Promise<Marker> {
+  const db = await getDb();
+  const { lastInsertId } = await db.execute(
+    'INSERT INTO markers (project_id, time_seconds, label, color) VALUES ($1,$2,$3,$4)',
+    [projectId, timeSeconds, label, color]
+  );
+  const rows = await db.select<Marker[]>('SELECT * FROM markers WHERE id = $1', [lastInsertId]);
+  if (!rows.length) throw new Error(`addMarker: inserted row not found (id=${lastInsertId})`);
+  return rows[0];
+}
+```
+
+**`c:\Users\User\alt-cut\src\App.tsx`**
+```tsx
+import type { TimelineClip, Marker } from './lib/db';
+
+  const [markers, setMarkers] = useState<Marker[]>([]);
+
+  const loadMarkers = useCallback(async (projectId: number) => {
+    const db = await import('./lib/db');
+    const m = await db.getMarkers(projectId);
+    setMarkers(m);
+  }, []);
+
+            {/* Timeline */}
+            <Timeline
+              markers={markers}
+              projectId={currentProject?.id ?? null}
+              onMarkersChange={() => currentProject && loadMarkers(currentProject.id)}
+            />
+```
+
+**`c:\Users\User\alt-cut\src\components\timeline\timeline-toolbar.tsx`**
+```tsx
+import {
+  MarkerIcon,
+} from './icons';
+
+interface TimelineToolbarProps {
+  onAddMarker: () => void;
+}
+
+export function TimelineToolbar({
+  onAddMarker,
+}: TimelineToolbarProps) {
+
+        {/* ── Marker ── */}
+        <div className="tl-group">
+          <button className="tl-b accent-marker" title="Add marker (M)" onClick={onAddMarker}>
+            <MarkerIcon />
+          </button>
+        </div>
+```

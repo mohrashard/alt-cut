@@ -111,23 +111,49 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
         // Store in DB
         await db.upsertAiMetadata(clipId, step, 'completed', rawJson);
         
+        // Clear old text clips to prevent duplicates on regenerate
+        await db.clearTextClips(selectedClip.project_id);
+
+        const clipStart = selectedClip.start_time;
+        const clipEnd = selectedClip.end_time;
+        let addedCount = 0;
+
         // Auto-populate text track
         for (const chunk of parsed.chunks) {
           if (!chunk.text) continue;
+          
+          // Only include chunks that overlap with the selected clip's visible region
+          if (chunk.end <= clipStart || chunk.start >= clipEnd) continue;
+
+          // Clamp the chunk's start and end times to the clip's bounds so they don't leak
+          const clampedStart = Math.max(chunk.start, clipStart);
+          const clampedEnd = Math.min(chunk.end, clipEnd);
+          const duration = clampedEnd - clampedStart;
+          
+          if (duration <= 0) continue;
+
+          // The start of the chunk relative to the clip's start time
+          const relativeStart = clampedStart - clipStart;
+          const timelineStart = selectedClip.timeline_start + relativeStart;
+
+          // Clone the chunk and update its start/end so TextClip calculates assetSeconds correctly
+          const chunkToSave = { ...chunk, start: clampedStart, end: clampedEnd };
+
           // Create dummy asset for text, storing the entire chunk JSON for word-level highlighting
-          const chunkJson = JSON.stringify(chunk);
-          const asset = await db.addAsset(selectedClip.project_id, `text://${chunkJson}`, 'text', chunk.end - chunk.start);
+          const chunkJson = JSON.stringify(chunkToSave);
+          const asset = await db.addAsset(selectedClip.project_id, `text://${chunkJson}`, 'text', duration);
           await db.addClipToTimelineSpecific(
             selectedClip.project_id,
             asset.id,
-            chunk.end - chunk.start,
+            duration,
             'text',
             0,
-            selectedClip.timeline_start + chunk.start
+            timelineStart
           );
+          addedCount++;
         }
 
-        setLog(prev => prev + `\n📝 ${parsed.chunks.length} caption chunks added to text track.`);
+        setLog(prev => prev + `\n📝 ${addedCount} caption chunks added to text track.`);
 
       } else if (step === 'denoise') {
         // Update the asset's file_path so the preview uses the clean video

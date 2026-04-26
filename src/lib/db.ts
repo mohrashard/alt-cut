@@ -55,7 +55,10 @@ export interface TimelineClip {
   end_time: number;
   timeline_start: number;
   audio_enabled: number;                     // 0 for muted, 1 for enabled
+  audio_volume: number;                      // 1.0 is default, 0.0 is silent, >1.0 is gain
   hidden: number;                            // 0 for visible, 1 for hidden
+  audio_separated?: number;
+  paired_audio_clip_id?: number | null;
   // joined from assets
   file_path?: string;
   type?: string;
@@ -125,8 +128,12 @@ export async function updateAssetFilePath(assetId: number, newPath: string): Pro
   await db.execute('UPDATE assets SET file_path = $1 WHERE id = $2', [newPath, assetId]);
 }
 
+export async function replaceClipAsset(clipId: number, newAssetId: number): Promise<void> {
+  const db = await getDb();
+  await db.execute('UPDATE timeline_clips SET asset_id = $1 WHERE id = $2', [newAssetId, clipId]);
+}
+
 // ─── Schema Migration ─────────────────────────────────────────
-// Adds track_type and track_lane to timeline_clips if they don't exist yet
 
 export async function runMigrations(): Promise<void> {
   const db = await getDb();
@@ -141,6 +148,15 @@ export async function runMigrations(): Promise<void> {
   } catch { /* column already exists */ }
   try {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN hidden INTEGER DEFAULT 0`);
+  } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN audio_volume REAL DEFAULT 1.0`);
+  } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN audio_separated INTEGER NOT NULL DEFAULT 0`);
+  } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN paired_audio_clip_id INTEGER`);
   } catch { /* column already exists */ }
 
   // Markers table
@@ -176,10 +192,12 @@ export async function getTimelineClips(projectId: number): Promise<TimelineClip[
     clip.ai_metadata = {};
     for (const m of metas) clip.ai_metadata[m.feature_type] = m;
 
-    // Default track_type for old rows that predate migration
+    // Default fallbacks for old rows
     if (!clip.track_type) clip.track_type = 'video';
     if (clip.track_lane == null) clip.track_lane = 0;
     if (clip.audio_enabled == null) clip.audio_enabled = 1;
+    if (clip.audio_volume == null) clip.audio_volume = 1.0;
+    if (clip.hidden == null) clip.hidden = 0;
   }
 
   return clips;
@@ -190,12 +208,14 @@ export async function addClipToTimeline(
   assetId: number,
   duration: number,
   trackType: 'video' | 'audio' | 'text' = 'video',
-  trackLane = 0
+  trackLane = 0,
+  audioEnabled = 1,
+  audioVolume = 1.0,
+  hidden = 0
 ): Promise<TimelineClip> {
   const db = await getDb();
 
   const existing = await getTimelineClips(projectId);
-  // Find the last clip on the same track type + lane
   const sameLane = existing.filter(c => c.track_type === trackType && c.track_lane === trackLane);
   let newTimelineStart = 0;
   let newTrackIndex = sameLane.length;
@@ -205,15 +225,14 @@ export async function addClipToTimeline(
     newTimelineStart = last.timeline_start + (last.end_time - last.start_time);
     newTrackIndex = last.track_index + 1;
   } else {
-    // Give a unique track_index across all types
     newTrackIndex = existing.length;
   }
 
   const { lastInsertId } = await db.execute(
     `INSERT INTO timeline_clips
-       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [projectId, assetId, newTrackIndex, trackType, trackLane, 0, duration, newTimelineStart, 1]
+       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [projectId, assetId, newTrackIndex, trackType, trackLane, 0, duration, newTimelineStart, audioEnabled, audioVolume, hidden]
   );
 
   const query = `
@@ -236,19 +255,21 @@ export async function addClipToTimelineSpecific(
   duration: number,
   trackType: 'video' | 'audio' | 'text',
   trackLane: number,
-  timelineStart: number
+  timelineStart: number,
+  audioEnabled = 1,
+  audioVolume = 1.0,
+  hidden = 0
 ): Promise<TimelineClip> {
   const db = await getDb();
-  
-  // Find a track_index. Just max + 1.
+
   const existing = await getTimelineClips(projectId);
   const newTrackIndex = existing.length;
 
   const { lastInsertId } = await db.execute(
     `INSERT INTO timeline_clips
-       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [projectId, assetId, newTrackIndex, trackType, trackLane, 0, duration, timelineStart, 1]
+       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [projectId, assetId, newTrackIndex, trackType, trackLane, 0, duration, timelineStart, audioEnabled, audioVolume, hidden]
   );
 
   const query = `
@@ -283,9 +304,14 @@ export async function setClipHidden(clipId: number, hidden: boolean): Promise<vo
   await db.execute('UPDATE timeline_clips SET hidden=$1 WHERE id=$2', [hidden ? 1 : 0, clipId]);
 }
 
+export async function setAudioVolume(clipId: number, volume: number): Promise<void> {
+  const db = await getDb();
+  await db.execute('UPDATE timeline_clips SET audio_volume=$1 WHERE id=$2', [volume, clipId]);
+}
+
 export async function splitClip(
   clipId: number,
-  splitAtSeconds: number // absolute video time of the split point
+  splitAtSeconds: number
 ): Promise<void> {
   const db = await getDb();
 
@@ -297,9 +323,8 @@ export async function splitClip(
   if (!rows.length) throw new Error('Clip not found');
   const clip = rows[0];
 
-  // The split point in clip-local time
   const clipDuration = clip.end_time - clip.start_time;
-  const splitLocalTime = splitAtSeconds - clip.timeline_start; // offset into clip
+  const splitLocalTime = splitAtSeconds - clip.timeline_start;
 
   if (splitLocalTime <= 0 || splitLocalTime >= clipDuration) {
     throw new Error('Split point is outside clip bounds');
@@ -316,8 +341,8 @@ export async function splitClip(
   // Insert Part B immediately after Part A
   await db.execute(
     `INSERT INTO timeline_clips
-       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       clip.project_id,
       clip.asset_id,
@@ -328,6 +353,8 @@ export async function splitClip(
       clip.end_time,
       clip.timeline_start + splitLocalTime,
       clip.audio_enabled ?? 1,
+      clip.audio_volume ?? 1.0,
+      clip.hidden ?? 0,
     ]
   );
 }
@@ -335,6 +362,16 @@ export async function splitClip(
 export async function deleteTimelineClip(clipId: number): Promise<void> {
   const db = await getDb();
   await db.execute('DELETE FROM timeline_clips WHERE id = $1', [clipId]);
+}
+
+export async function clearTimelineClips(projectId: number): Promise<void> {
+  const db = await getDb();
+  await db.execute('DELETE FROM timeline_clips WHERE project_id = $1', [projectId]);
+}
+
+export async function clearTextClips(projectId: number): Promise<void> {
+  const db = await getDb();
+  await db.execute('DELETE FROM timeline_clips WHERE project_id = $1 AND track_type = $2', [projectId, 'text']);
 }
 
 export async function updateTimelineOrder(clips: TimelineClip[]): Promise<void> {
@@ -374,9 +411,6 @@ export async function upsertAiMetadata(
 }
 
 // ─── Undo / Redo ──────────────────────────────────────────────
-// Restores an exact snapshot by deleting all clips for the project and
-// reinserting them with their original IDs. ai_metadata is safe because
-// it references clip IDs which are preserved by INSERT OR REPLACE.
 export async function restoreTimelineClips(
   projectId: number,
   clips: TimelineClip[]
@@ -387,13 +421,13 @@ export async function restoreTimelineClips(
     await db.execute(
       `INSERT OR REPLACE INTO timeline_clips
          (id, project_id, asset_id, track_index, track_type, track_lane,
-          start_time, end_time, timeline_start, audio_enabled)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         clip.id, clip.project_id, clip.asset_id, clip.track_index,
         clip.track_type || 'video', clip.track_lane ?? 0,
         clip.start_time, clip.end_time, clip.timeline_start,
-        clip.audio_enabled ?? 1,
+        clip.audio_enabled ?? 1, clip.audio_volume ?? 1.0, clip.hidden ?? 0,
       ]
     );
   }
@@ -413,11 +447,11 @@ export async function extractAudio(clipId: number): Promise<void> {
   // Create detached audio clip
   await db.execute(
     `INSERT INTO timeline_clips 
-       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
-      clip.project_id, clip.asset_id, clip.track_index, 'audio', 0, 
-      clip.start_time, clip.end_time, clip.timeline_start, 1
+      clip.project_id, clip.asset_id, clip.track_index, 'audio', 0,
+      clip.start_time, clip.end_time, clip.timeline_start, 1, 1.0, 0
     ]
   );
 }
@@ -441,6 +475,7 @@ export async function addMarker(
     [projectId, timeSeconds, label, color]
   );
   const rows = await db.select<Marker[]>('SELECT * FROM markers WHERE id = $1', [lastInsertId]);
+  if (!rows.length) throw new Error(`addMarker: inserted row not found (id=${lastInsertId})`);
   return rows[0];
 }
 
@@ -455,4 +490,19 @@ export async function getMarkers(projectId: number): Promise<Marker[]> {
 export async function deleteMarker(markerId: number): Promise<void> {
   const db = await getDb();
   await db.execute('DELETE FROM markers WHERE id = $1', [markerId]);
+}
+
+export async function setAudioSeparated(
+  clipId: number,
+  separated: boolean,
+  pairedAudioClipId: number | null,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE timeline_clips
+        SET audio_separated      = $1,
+            paired_audio_clip_id = $2
+      WHERE id = $3`,
+    [separated ? 1 : 0, pairedAudioClipId, clipId],
+  );
 }

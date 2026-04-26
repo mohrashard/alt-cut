@@ -1,4 +1,4 @@
-import { AbsoluteFill, useCurrentFrame, useVideoConfig, Video, Audio, Series, Sequence, spring } from 'remotion';
+import { AbsoluteFill, useCurrentFrame, useVideoConfig, Video, Audio, Sequence, spring } from 'remotion';
 
 const secondsToFrame = (t: number, fps: number) => Math.floor(t * fps);
 
@@ -28,25 +28,24 @@ export const HormoziCaptions: React.FC<Props> = ({
       {videoClips.length > 0 ? (
         <AbsoluteFill>
           {/* Video tracks */}
-          <Series>
-            {videoClips.map((clip) => {
-              const clipDuration = clip.end_time - clip.start_time;
-              const durationFrames = Math.max(1, secondsToFrame(clipDuration, fps));
+          {videoClips.map((clip) => {
+            const startFrame = secondsToFrame(clip.timeline_start, fps);
+            const durationFrames = Math.max(1, secondsToFrame(clip.end_time - clip.start_time, fps));
 
-              return (
-                <Series.Sequence key={`vid-${clip.id}`} durationInFrames={durationFrames}>
-                  <AbsoluteFill>
-                    <Video
-                      src={clip.previewSrc || clip.file_path}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      startFrom={secondsToFrame(clip.start_time, fps)}
-                      muted={clip.audio_enabled === 0}
-                    />
-                  </AbsoluteFill>
-                </Series.Sequence>
-              );
-            })}
-          </Series>
+            return (
+              <Sequence key={`vid-${clip.id}`} from={startFrame} durationInFrames={durationFrames}>
+                <AbsoluteFill>
+                  <Video
+                    src={clip.previewSrc || clip.file_path}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    startFrom={secondsToFrame(clip.start_time, fps)}
+                    muted={clip.audio_enabled === 0}
+                    volume={clip.audio_volume ?? 1.0}
+                  />
+                </AbsoluteFill>
+              </Sequence>
+            );
+          })}
 
           {/* Audio tracks */}
           {audioClips.map((clip) => {
@@ -57,6 +56,7 @@ export const HormoziCaptions: React.FC<Props> = ({
                 <Audio
                   src={clip.previewSrc || clip.file_path}
                   startFrom={secondsToFrame(clip.start_time, fps)}
+                  volume={clip.audio_enabled === 0 ? 0 : (clip.audio_volume ?? 1.0)}
                 />
               </Sequence>
             );

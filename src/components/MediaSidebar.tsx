@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { useDraggable } from '@dnd-kit/core';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -8,6 +8,8 @@ interface MediaSidebarProps {
   projectId?: number;
   onMediaSelected: (path: string) => void;
   onMediaAdded: (path: string) => void;
+  highlightAssetId?: number | null;
+  onHighlightClear?: () => void;
 }
 
 const UploadIcon = () => (
@@ -18,10 +20,21 @@ const UploadIcon = () => (
   </svg>
 );
 
-export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded }: MediaSidebarProps) {
+export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded, highlightAssetId, onHighlightClear }: MediaSidebarProps) {
   const [mediaItems, setMediaItems] = useState<Asset[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [activeNav, setActiveNav] = useState('media');
+  const highlightRef = useRef<HTMLDivElement | null>(null);
+
+  // When a highlight is requested, switch to the media tab and scroll to the asset
+  useEffect(() => {
+    if (highlightAssetId == null) return;
+    setActiveNav('media');
+    const id = setTimeout(() => {
+      highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 80);
+    return () => clearTimeout(id);
+  }, [highlightAssetId]);
 
   useEffect(() => {
     const handleDragOver = (e: DragEvent) => { e.preventDefault(); setIsDragging(true); };
@@ -133,7 +146,9 @@ export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded }: Media
                 <DraggableAsset
                   key={item.id}
                   item={item}
-                  onClick={() => onMediaSelected(item.file_path)}
+                  isHighlighted={item.id === highlightAssetId}
+                  highlightRef={item.id === highlightAssetId ? highlightRef : undefined}
+                  onClick={() => { onMediaSelected(item.file_path); onHighlightClear?.(); }}
                 />
               ))}
             </>
@@ -160,7 +175,12 @@ export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded }: Media
   );
 }
 
-function DraggableAsset({ item, onClick }: { item: Asset; onClick: () => void }) {
+function DraggableAsset({ item, onClick, isHighlighted, highlightRef }: {
+  item: Asset;
+  onClick: () => void;
+  isHighlighted?: boolean;
+  highlightRef?: React.RefObject<HTMLDivElement | null>;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `asset-${item.id}`,
     data: { type: 'Asset', asset: item },
@@ -176,8 +196,11 @@ function DraggableAsset({ item, onClick }: { item: Asset; onClick: () => void })
 
   return (
     <div
-      ref={setNodeRef}
-      className={`asset-item ${isDragging ? 'dragging' : ''}`}
+      ref={el => {
+        setNodeRef(el);
+        if (highlightRef) (highlightRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+      }}
+      className={`asset-item ${isDragging ? 'dragging' : ''} ${isHighlighted ? 'asset-highlighted' : ''}`}
       style={style}
       {...listeners}
       {...attributes}

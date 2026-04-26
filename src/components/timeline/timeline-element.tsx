@@ -3,11 +3,16 @@ import { fmt } from './utils';
 import { useVideoThumbnail } from './hooks/use-video-thumbnail';
 import { useAudioWaveform } from './hooks/use-audio-waveform';
 import { AudioWaveform } from './audio-waveform';
+import { AudioVolumeLine } from './audio-volume-line';
 
 // Track heights (must match constants.ts + CSS)
 const VIDEO_H = 56;
 const AUDIO_H = 40;
 const THUMB_ASPECT = 16 / 9;
+
+// CapCut palette
+const AUDIO_TRACK_COLOR = '#0d9669';   // dark emerald track background
+const AUDIO_BAR_COLOR = 'rgba(255,255,255,0.92)'; // white waveform bars
 
 interface TrimState {
   clipId: number;
@@ -30,19 +35,20 @@ interface TimelineElementProps {
   dragClip: DragClipState | null;
   onClipSelected: (e: React.MouseEvent, id: number) => void;
   onClipDragStart: (e: React.MouseEvent, clip: TimelineClip) => void;
-  onClipRightClick: (e: React.MouseEvent, clipId: number) => void;
+  onClipOptionsClick: (e: React.MouseEvent, clipId: number) => void;
   onTrimMouseDown: (e: React.MouseEvent, clip: TimelineClip, edge: 'left' | 'right') => void;
+  onVolumeChange: (clipId: number, volume: number) => void;
+  onVolumeDragEnd: (clipId: number, volume: number) => void;
 }
 
 // ─── Video thumbnail background ───────────────────────────────
 function VideoContent({ clip, dur }: { clip: TimelineClip; dur: number }) {
   const thumbnail = useVideoThumbnail(clip.file_path, clip.start_time);
-  const tileW     = Math.round(VIDEO_H * THUMB_ASPECT); // ~99px
-  const label     = clip.file_path?.split(/[/\\]/).pop() ?? '';
+  const tileW = Math.round(VIDEO_H * THUMB_ASPECT);
+  const label = clip.file_path?.split(/[/\\]/).pop() ?? '';
 
   return (
     <>
-      {/* Tiled thumbnail background */}
       {thumbnail && (
         <div
           className="clip-thumb-bg"
@@ -52,7 +58,6 @@ function VideoContent({ clip, dur }: { clip: TimelineClip; dur: number }) {
           }}
         />
       )}
-      {/* Top gradient header with filename + duration */}
       <div className="clip-thumb-header">
         {dur >= 2 && <span className="clip-thumb-name">{label}</span>}
         <span className="clip-dur clip-thumb-dur">{fmt(dur)}</span>
@@ -61,27 +66,93 @@ function VideoContent({ clip, dur }: { clip: TimelineClip; dur: number }) {
   );
 }
 
+// ─── Shared waveform + volume line ────────────────────────────
+// KEY FIX: waveHeight now = full AUDIO_H so the canvas covers the entire clip.
+// The canvas itself paints the track background + white bars, matching CapCut.
+// Previously the canvas was 70% height, leaving the bottom area as bare CSS
+// background — which made it look like a flat bar with no visible waveform.
+function WaveformWithVolume({
+  clip,
+  dur,
+  widthPx,
+  waveHeight,
+  waveOpacity = 1,
+  onVolumeChange,
+  onVolumeDragEnd,
+}: {
+  clip: TimelineClip;
+  dur: number;
+  widthPx: number;
+  waveHeight: number;
+  waveOpacity?: number;
+  onVolumeChange: (clipId: number, volume: number) => void;
+  onVolumeDragEnd: (clipId: number, volume: number) => void;
+}) {
+  const samples = useAudioWaveform(clip.file_path, clip.start_time, dur);
+
+  // KEY FIX: render the canvas even when samples === null.
+  // Previously returning null here meant the clip showed ONLY the CSS
+  // background color (flat green bar) with no canvas at all until decode
+  // finished. Now the canvas renders immediately with a placeholder flat line,
+  // then updates in-place when samples arrive — no layout shift.
+  return (
+    <>
+      <div
+        className="clip-waveform-wrap"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          ...(waveOpacity < 1 ? { opacity: waveOpacity } : {}),
+        }}
+      >
+        <AudioWaveform
+          samples={samples}        // null → canvas draws flat placeholder line
+          width={widthPx}
+          height={waveHeight}
+          trackColor={AUDIO_TRACK_COLOR}
+          barColor={AUDIO_BAR_COLOR}
+        />
+      </div>
+      <AudioVolumeLine
+        volume={clip.audio_volume ?? 1.0}
+        onChange={(vol) => onVolumeChange(clip.id, vol)}
+        onDragEnd={(vol) => onVolumeDragEnd(clip.id, vol)}
+      />
+    </>
+  );
+}
+
 // ─── Audio waveform content ───────────────────────────────────
-function AudioContent({ clip, dur, widthPx }: { clip: TimelineClip; dur: number; widthPx: number }) {
-  const samples   = useAudioWaveform(clip.file_path, clip.start_time, dur);
-  const isMuted   = clip.audio_enabled === 0;
-  const label     = clip.file_path?.split(/[/\\]/).pop() ?? '';
+function AudioContent({
+  clip,
+  dur,
+  widthPx,
+  onVolumeChange,
+  onVolumeDragEnd,
+}: {
+  clip: TimelineClip;
+  dur: number;
+  widthPx: number;
+  onVolumeChange: (clipId: number, volume: number) => void;
+  onVolumeDragEnd: (clipId: number, volume: number) => void;
+}) {
+  const isMuted = clip.audio_enabled === 0;
+  const label = clip.file_path?.split(/[/\\]/).pop() ?? '';
 
   return (
     <>
-      {/* Waveform canvas fills the clip behind the label */}
-      {samples && !isMuted && (
-        <div className="clip-waveform-wrap">
-          <AudioWaveform
-            samples={samples}
-            width={widthPx}
-            height={AUDIO_H * 0.7}
-            color="#10b981"
-          />
-        </div>
+      {!isMuted && (
+        <WaveformWithVolume
+          clip={clip}
+          dur={dur}
+          widthPx={widthPx}
+          waveHeight={AUDIO_H}   // FIX: was AUDIO_H * 0.7 — now fills full clip height
+          onVolumeChange={onVolumeChange}
+          onVolumeDragEnd={onVolumeDragEnd}
+        />
       )}
-      {/* Label row */}
-      <div className="clip-label">
+      {/* Label overlaid on top of canvas, so it's always readable */}
+      <div className="clip-label" style={{ position: 'relative', zIndex: 1 }}>
         {isMuted && <span style={{ marginRight: 4 }}>🔇</span>}
         {dur >= 2 && <span>{label}</span>}
       </div>
@@ -109,74 +180,127 @@ export function TimelineElement({
   dragClip,
   onClipSelected,
   onClipDragStart,
-  onClipRightClick,
+  onClipOptionsClick,
   onTrimMouseDown,
+  onVolumeChange,
+  onVolumeDragEnd,
 }: TimelineElementProps) {
-  let dur    = clip.end_time - clip.start_time;
+  let dur = clip.end_time - clip.start_time;
   let tStart = clip.timeline_start;
 
   if (trimState?.clipId === clip.id) {
-    dur    = trimState.currentEnd - trimState.currentStart;
+    dur = trimState.currentEnd - trimState.currentStart;
     tStart = trimState.currentTimelineStart;
   } else if (dragClip?.clipId === clip.id) {
     tStart = dragClip.currentTimelineStart;
   }
 
-  const leftPx     = tStart * pps;
-  const widthPx    = Math.max(dur * pps, 8);
-  const isSel      = isSelected;
-  const isHidden   = clip.hidden === 1;
-  const isBusy     = clip.ai_metadata?.['captions']?.status === 'processing' ||
-                     clip.ai_metadata?.['denoise']?.status === 'processing';
+  const leftPx = tStart * pps;
+  const widthPx = Math.max(dur * pps, 8);
+  const isHidden = clip.hidden === 1;
+
+  // Covers any AI feature — not just hardcoded 'captions'/'denoise'
+  const isBusy =
+    clip.ai_metadata != null &&
+    Object.values(clip.ai_metadata).some(
+      (v) => v != null && typeof v === 'object' && 'status' in v && v.status === 'processing',
+    );
+
   const isDragging = dragClip?.clipId === clip.id;
-  const isMuted    = clip.audio_enabled === 0;
-  const label      = clip.file_path?.split(/[/\\]/).pop() ?? '';
+  const isMuted = clip.audio_enabled === 0;
+  const label = clip.file_path?.split(/[/\\]/).pop() ?? '';
 
   return (
     <div
-      className={`clip-block ${trackType} ${isSel ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isMuted ? 'muted' : ''} ${isHidden ? 'clip-hidden' : ''}`}
-      style={{ left: leftPx, width: widthPx, position: 'absolute', top: '50%', transform: 'translateY(-50%)' }}
+      className={[
+        'clip-block',
+        trackType,
+        isSelected ? 'selected' : '',
+        isDragging ? 'dragging' : '',
+        isMuted ? 'muted' : '',
+        isHidden ? 'clip-hidden' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      style={{
+        left: leftPx,
+        width: widthPx,
+        position: 'absolute',
+        top: '50%',
+        transform: 'translateY(-50%)',
+      }}
       onClick={(e) => { e.stopPropagation(); onClipSelected(e, clip.id); }}
+      onDoubleClick={(e) => { e.stopPropagation(); onClipOptionsClick(e, clip.id); }}
       onMouseDown={(e) => { if (e.button === 0) onClipDragStart(e, clip); }}
-      onContextMenu={(e) => onClipRightClick(e, clip.id)}
-      title={`${label}\n${fmt(clip.timeline_start)} → ${fmt(clip.timeline_start + dur)}`}
+      onContextMenu={(e) => onClipOptionsClick(e, clip.id)}
+      title={`${label}\n${fmt(tStart)} → ${fmt(tStart + dur)}`}
     >
-      {/* Left trim handle */}
+      <button
+        className="tl-clip-opts-btn"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onClipOptionsClick(e, clip.id);
+        }}
+        title="Clip Options"
+      >
+        ⋯
+      </button>
+
       <div className="trim-handle trim-handle-left" onMouseDown={(e) => onTrimMouseDown(e, clip, 'left')} />
 
-      {/* Per-track rich content */}
       {trackType === 'video' && <VideoContent clip={clip} dur={dur} />}
-      {trackType === 'audio' && <AudioContent clip={clip} dur={dur} widthPx={widthPx} />}
-      {trackType === 'text'  && <TextContent  clip={clip} dur={dur} />}
-
-      {/* AI busy indicator */}
-      {isBusy && (
-        <span className="clip-busy-spin">⚙️</span>
+      {trackType === 'audio' && (
+        <AudioContent
+          clip={clip}
+          dur={dur}
+          widthPx={widthPx}
+          onVolumeChange={onVolumeChange}
+          onVolumeDragEnd={onVolumeDragEnd}
+        />
       )}
+      {trackType === 'text' && <TextContent clip={clip} dur={dur} />}
 
-      {/* Right trim handle */}
+      {isBusy && <span className="clip-busy-spin">⚙️</span>}
+
       <div className="trim-handle trim-handle-right" onMouseDown={(e) => onTrimMouseDown(e, clip, 'right')} />
     </div>
   );
 }
 
-// ─── Audio shadow element (for video clips) ───────────────────
-export function AudioShadowElement({ clip, dur, leftPx, widthPx }: { clip: TimelineClip; dur: number; leftPx: number; widthPx: number }) {
-  const samples = useAudioWaveform(clip.file_path, clip.start_time, dur);
+// ─── Audio shadow element (for video clips with detached audio track) ────────
+export function AudioShadowElement({
+  clip,
+  dur,
+  leftPx,
+  widthPx,
+  onVolumeChange,
+  onVolumeDragEnd,
+}: {
+  clip: TimelineClip;
+  dur: number;
+  leftPx: number;
+  widthPx: number;
+  onVolumeChange: (clipId: number, volume: number) => void;
+  onVolumeDragEnd: (clipId: number, volume: number) => void;
+}) {
+  const isMuted = clip.audio_enabled === 0;
+
   return (
     <div
       className="clip-block audio-shadow"
       style={{ left: leftPx, width: widthPx, position: 'absolute', top: '50%', transform: 'translateY(-50%)' }}
     >
-      {samples && (
-        <div className="clip-waveform-wrap" style={{ opacity: 0.4 }}>
-          <AudioWaveform
-            samples={samples}
-            width={widthPx}
-            height={AUDIO_H * 0.6}
-            color="#10b981"
-          />
-        </div>
+      {!isMuted && (
+        <WaveformWithVolume
+          clip={clip}
+          dur={dur}
+          widthPx={widthPx}
+          waveHeight={AUDIO_H}
+          waveOpacity={0.5}
+          onVolumeChange={onVolumeChange}
+          onVolumeDragEnd={onVolumeDragEnd}
+        />
       )}
     </div>
   );

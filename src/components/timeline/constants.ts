@@ -36,4 +36,9 @@ export interface TimelineProps {
   onPpsChange?: (pps: number) => void;
   // Ref to timecode span for direct DOM text update during playback
   timecodeDomRef?: React.RefObject<HTMLSpanElement | null>;
+  // Asset panel callbacks
+  onRevealAsset?: (assetId: number) => void;
+  onReplaceAsset?: (clipId: number) => void;
+  // Raw engine time tracker
+  engineTimeRef?: React.MutableRefObject<number>;
 }

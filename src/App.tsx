@@ -94,11 +94,13 @@ function App() {
   const [pps, setPps] = useState(80); // mirrors Timeline's pps for PreviewWindow
   const playheadDomRef = useRef<HTMLDivElement | null>(null);
   const timecodeDomRef = useRef<HTMLSpanElement | null>(null);
+  const engineTimeRef = useRef<number>(0);
 
   const [currentProject, setCurrentProject] = useState<any>(null);
   const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
   const [selectedClipIds, setSelectedClipIds] = useState<number[]>([]);
   const [markers, setMarkers] = useState<Marker[]>([]);
+  const [highlightAssetId, setHighlightAssetId] = useState<number | null>(null);
 
   // ── Undo/Redo history (ref-based to avoid re-render on push) ─
   const historyRef      = useRef<TimelineClip[][]>([]);
@@ -195,17 +197,31 @@ function App() {
       if (over?.id === 'timeline-audio-droppable') {
         await db.addClipToTimeline(currentProject.id, asset.id, dur, 'audio', 0);
       } else if (over?.id === 'timeline-droppable') {
-        const trackType = asset.type === 'audio' ? 'audio' : 'video';
+        const trackType = asset.type === 'audio' ? 'audio' : (asset.type === 'text' ? 'text' : 'video');
         await db.addClipToTimeline(currentProject.id, asset.id, dur, trackType, 0);
       }
       await loadTimeline(currentProject.id);
     }
   };
 
-  const videoDuration = timelineClips.length > 0
-    ? timelineClips[timelineClips.length - 1].timeline_start +
-      (timelineClips[timelineClips.length - 1].end_time - timelineClips[timelineClips.length - 1].start_time)
-    : 0;
+  // Compute the true end-time across ALL clips regardless of track order
+  const videoDuration = timelineClips.reduce((max, c) => {
+    const end = c.timeline_start + (c.end_time - c.start_time);
+    return end > max ? end : max;
+  }, 0);
+
+  const handleClearTimeline = useCallback(async () => {
+    if (!currentProject) return;
+    if (!confirm('Clear the entire timeline? This cannot be undone.')) return;
+    const db = await import('./lib/db');
+    await db.clearTimelineClips(currentProject.id);
+    setTimelineClips([]);
+    setSelectedClipIds([]);
+    historyRef.current = [[]];
+    historyIndexRef.current = 0;
+    setCanUndo(false);
+    setCanRedo(false);
+  }, [currentProject]);
 
   const handleExport = async () => {
     if (!(window as any).__TAURI_INTERNALS__) {
@@ -240,7 +256,11 @@ function App() {
       <div className="app-shell">
 
         {/* Top Nav */}
-        <TopNav isRendering={isRendering} onExport={handleExport} />
+        <TopNav
+          isRendering={isRendering}
+          onExport={handleExport}
+          onClearTimeline={handleClearTimeline}
+        />
 
         {/* Toolbar */}
         <div className="toolbar">
@@ -265,6 +285,8 @@ function App() {
             projectId={currentProject?.id}
             onMediaSelected={handleMediaSelected}
             onMediaAdded={handleMediaAdded}
+            highlightAssetId={highlightAssetId}
+            onHighlightClear={() => setHighlightAssetId(null)}
           />
 
           {/* Center Workspace */}
@@ -279,6 +301,7 @@ function App() {
               timecodeDomRef={timecodeDomRef}
               pps={pps}
               videoDuration={videoDuration}
+              engineTimeRef={engineTimeRef}
             />
 
             {/* Timeline */}
@@ -301,6 +324,8 @@ function App() {
               playheadDomRef={playheadDomRef}
               onPpsChange={setPps}
               timecodeDomRef={timecodeDomRef}
+              onRevealAsset={setHighlightAssetId}
+              engineTimeRef={engineTimeRef}
             />
           </div>
 

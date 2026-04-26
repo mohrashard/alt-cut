@@ -39,20 +39,20 @@ export function TimelinePlayhead({
   currentTimeSec = 0,
 }: TimelinePlayheadProps) {
   // All mutable values live in refs — zero stale-closure risk in DOM callbacks
-  const isDragging       = useRef(false);
-  const ppsRef           = useRef(pps);
-  const totalDurRef      = useRef(totalDur);
-  const snapTargetsRef   = useRef(snapTargets);
-  const magnetRef        = useRef(magnetOn);
-  const fpsRef           = useRef(fps);
-  const headRef          = useRef<HTMLButtonElement>(null);
+  const isDragging = useRef(false);
+  const ppsRef = useRef(pps);
+  const totalDurRef = useRef(totalDur);
+  const snapTargetsRef = useRef(snapTargets);
+  const magnetRef = useRef(magnetOn);
+  const fpsRef = useRef(fps);
+  const headRef = useRef<HTMLButtonElement>(null);
 
   // Keep refs in sync every render (safe, synchronous)
-  ppsRef.current         = pps;
-  totalDurRef.current    = totalDur;
+  ppsRef.current = pps;
+  totalDurRef.current = totalDur;
   snapTargetsRef.current = snapTargets;
-  magnetRef.current      = magnetOn;
-  fpsRef.current         = fps;
+  magnetRef.current = magnetOn;
+  fpsRef.current = fps;
 
   // ── Set initial position & Dynamic Height ─────────────────────
   useEffect(() => {
@@ -60,10 +60,16 @@ export function TimelinePlayhead({
       playheadRef.current.style.left = `${initialLeftPx}px`;
     }
 
+    // IMPROVEMENT #2: Horizontal Scrollbar Height Correction
+    // Subtracts the scrollbar height so the playhead line doesn't
+    // draw over or intercept clicks on the bottom scrollbar.
     const updateHeight = () => {
       if (tracksScrollRef.current && playheadRef.current) {
-        // Height of the tracks scroll area (excluding horizontal scrollbar if any)
-        const totalHeight = tracksScrollRef.current.clientHeight;
+        const el = tracksScrollRef.current;
+        // A horizontal scrollbar exists when content is wider than the container
+        const hasScrollbar = el.scrollWidth > el.clientWidth;
+        // Standard scrollbar is ~14px tall; subtract it so the line ends cleanly
+        const totalHeight = el.clientHeight - (hasScrollbar ? 14 : 0);
         playheadRef.current.style.height = `${totalHeight}px`;
       }
     };
@@ -99,18 +105,18 @@ export function TimelinePlayhead({
   // ── Drag handlers (attached to document, only when dragging) ──
   const onMouseMove = (e: MouseEvent) => {
     if (!isDragging.current || !tracksScrollRef.current || !playheadRef.current) return;
-    const rect     = tracksScrollRef.current.getBoundingClientRect();
-    const rawPx    = e.clientX - rect.left + tracksScrollRef.current.scrollLeft;
-    const clamped  = Math.max(0, Math.min(rawPx, totalDurRef.current * ppsRef.current));
-    
-    // Snapping to targets (clips/markers)
+    const rect = tracksScrollRef.current.getBoundingClientRect();
+    const rawPx = e.clientX - rect.left + tracksScrollRef.current.scrollLeft;
+    const clamped = Math.max(0, Math.min(rawPx, totalDurRef.current * ppsRef.current));
+
+    // Snap to clip/marker targets first
     const snappedTargetPx = snapPx(clamped);
-    
-    // Snapping to frames (Rule #3: Frame Accuracy)
+
+    // Then snap to the nearest frame boundary (Rule #3: Frame Accuracy)
     const sec = snappedTargetPx / ppsRef.current;
     const frame = Math.floor(sec * fpsRef.current);
     const frameSec = frame / fpsRef.current;
-    
+
     playheadRef.current.style.left = `${frameSec * ppsRef.current}px`;
   };
 
@@ -120,11 +126,11 @@ export function TimelinePlayhead({
     playheadRef.current?.removeAttribute('data-playhead-dragging');
     headRef.current?.classList.remove('is-snapping');
     document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup',   onMouseUp);
+    document.removeEventListener('mouseup', onMouseUp);
     onSnapGuide?.(null);
 
     if (!tracksScrollRef.current || !playheadRef.current) return;
-    
+
     const curPx = parseFloat(playheadRef.current.style.left);
     onSeek(curPx / ppsRef.current);
   };
@@ -137,24 +143,39 @@ export function TimelinePlayhead({
     // Signal to PreviewWindow RAF to back off during drag
     playheadRef.current?.setAttribute('data-playhead-dragging', 'true');
     document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup',   onMouseUp);
+    document.addEventListener('mouseup', onMouseUp);
   };
 
   // ── Keyboard frame stepping ──────────────────────────────────
+  // IMPROVEMENT #3: Bulletproof Keyboard Seeking Math
+  // Uses integer frame arithmetic instead of floating-point addition,
+  // so arrow keys never drift off frame boundaries over long timelines.
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
     if (!playheadRef.current) return;
+
     const direction = e.key === 'ArrowRight' ? 1 : -1;
-    const frameSec  = 1 / fpsRef.current;
-    const curPx     = parseFloat(playheadRef.current.style.left ?? '0');
-    const curSec    = curPx / ppsRef.current;
-    const nextSec   = Math.max(0, Math.min(totalDurRef.current, curSec + direction * frameSec));
+    const curPx = parseFloat(playheadRef.current.style.left ?? '0');
+    const curSec = curPx / ppsRef.current;
+
+    // 1. Convert current position to an exact integer frame number
+    const currentFrame = Math.round(curSec * fpsRef.current);
+    // 2. Step by exactly 1 frame (no floating-point drift)
+    const nextFrame = currentFrame + direction;
+    // 3. Convert back to seconds and clamp to timeline boundaries
+    const nextSec = Math.max(0, Math.min(totalDurRef.current, nextFrame / fpsRef.current));
+
     playheadRef.current.style.left = `${nextSec * ppsRef.current}px`;
     onSeek(nextSec);
   };
 
   return (
+    // IMPROVEMENT #1: Pixel-Perfect Line Centering
+    // The `transform: translateX(-50%)` on the `.playhead-line` CSS class
+    // shifts the element left by half its own width, so the visual centre
+    // of the 2px line sits exactly on the frame boundary — not its left edge.
+    // Add `transform: translateX(-50%);` to your `.playhead-line` CSS class.
     <div
       ref={playheadRef as React.RefObject<HTMLDivElement>}
       role="slider"
