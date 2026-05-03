@@ -81,7 +81,7 @@ body {
   overflow: hidden;
 }
 
-/* ─── TOP NAV ────────────────────────────────────────────── */
+/* ─── TOP NAV (legacy classes kept for safety) ──────────── */
 .topnav {
   height: var(--topnav-height);
   background: var(--bg-panel);
@@ -96,153 +96,201 @@ body {
   z-index: 100;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
+.topnav-left  { display: flex; align-items: stretch; height: 100%; }
+.topnav-logo  { display: flex; align-items: center; gap: 8px; padding: 0 16px; border-right: 1px solid var(--border-color); font-weight: 700; font-size: 14px; color: var(--text-primary); cursor: pointer; flex-shrink: 0; }
+.topnav-logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, var(--accent-primary), #fb923c); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #000; font-weight: 900; font-size: 14px; box-shadow: var(--shadow-glow); transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+.topnav-logo:hover .topnav-logo-icon { transform: scale(1.08) rotate(-4deg); }
+.topnav-menu  { display: flex; align-items: center; padding: 0 8px; border-right: 1px solid var(--border-color); }
+.menu-btn     { padding: 5px 12px; background: transparent; border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 12px; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+.menu-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.topnav-title { display: flex; align-items: center; padding: 0 16px; font-size: 13px; color: var(--text-secondary); }
+.topnav-center { display: flex; align-items: center; gap: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 20px; padding: 3px 4px; }
+.topnav-right  { display: flex; align-items: center; gap: 8px; }
 
-.topnav-left {
-  display: flex;
-  align-items: stretch;
-  height: 100%;
-}
-
-.topnav-logo {
+/* ─── TOP NAV — redesigned (ac-topnav) ──────────────────── */
+.ac-topnav {
+  height: 48px;
+  background: var(--ac-bg-panel);
+  border-bottom: 1px solid var(--ac-border);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  border-right: 1px solid var(--border-color);
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--text-primary);
-  cursor: pointer;
+  gap: 0;
+  padding: 0 12px;
+  flex-shrink: 0;
+  z-index: 100;
+  box-shadow: 0 1px 0 var(--ac-border);
+}
+
+/* Logo */
+.ac-topnav-logo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px 0 4px;
   flex-shrink: 0;
 }
 
-.topnav-logo-icon {
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(135deg, var(--accent-primary), #fb923c);
-  border-radius: 10px;
+.ac-logo-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--ac-accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #000;
-  font-weight: 900;
-  font-size: 14px;
-  box-shadow: var(--shadow-glow);
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+  box-shadow: 0 0 10px rgba(124, 92, 252, 0.4);
 }
 
-.topnav-logo:hover .topnav-logo-icon {
-  transform: scale(1.08) rotate(-4deg);
-}
-
-.topnav-menu {
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  border-right: 1px solid var(--border-color);
-}
-
-.menu-btn {
-  padding: 5px 12px;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: inherit;
-}
-
-.menu-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.topnav-title {
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
+.ac-logo-text {
   font-size: 13px;
-  color: var(--text-secondary);
+  font-weight: 700;
+  color: var(--ac-text-primary);
+  letter-spacing: -0.2px;
 }
 
-.topnav-center {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 20px;
-  padding: 3px 4px;
+/* Vertical divider */
+.ac-topnav-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--ac-border);
+  flex-shrink: 0;
+  margin: 0 8px;
 }
 
-.topnav-right {
+/* Plain-text menu buttons (File · Edit · View group) */
+.ac-topnav-menu {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
 }
 
-.btn-icon {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: var(--radius-sm);
+.ac-menu-btn {
+  padding: 4px 9px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--ac-text-secondary);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s;
-  border: none;
   font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+  line-height: 1;
 }
 
-.btn-icon-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
+.ac-menu-btn:hover {
+  background: var(--ac-bg-elevated);
+  color: var(--ac-text-primary);
 }
 
-.btn-icon-ghost:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+.ac-menu-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
-.btn-icon-pro {
-  background: linear-gradient(135deg, #a855f7, #7c3aed);
-  color: white;
-}
-
-.btn-icon-share {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-}
-
-.btn-icon-export {
-  background: linear-gradient(135deg, var(--accent-primary), #fb923c);
-  color: #000;
-  font-weight: 700;
-  box-shadow: 0 4px 14px rgba(234, 179, 8, 0.3);
+/* Small icon buttons (undo / redo / trash) */
+.ac-icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
   border: none;
+  background: transparent;
+  color: var(--ac-text-secondary);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  font-family: inherit;
+  flex-shrink: 0;
 }
 
-.btn-icon-export:hover {
-  background: linear-gradient(135deg, var(--accent-primary-hover), #f97316);
+.ac-icon-btn:hover {
+  background: var(--ac-bg-elevated);
+  color: var(--ac-text-primary);
+}
+
+.ac-icon-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+/* Editable project name pill */
+.ac-project-name {
+  background: var(--ac-bg-elevated);
+  border: 1px solid var(--ac-border);
+  border-radius: 6px;
+  color: var(--ac-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  padding: 4px 10px;
+  outline: none;
+  width: 160px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  text-align: center;
+}
+
+.ac-project-name:hover {
+  border-color: var(--ac-border-subtle);
+}
+
+.ac-project-name:focus {
+  border-color: var(--ac-accent);
+  box-shadow: 0 0 0 2px var(--ac-accent-dim);
+}
+
+/* Resolution badge */
+.ac-res-badge {
+  font-size: 11px;
+  color: var(--ac-text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+/* Export button */
+.ac-export-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  background: var(--ac-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
+  box-shadow: 0 2px 10px rgba(124, 92, 252, 0.35);
+}
+
+.ac-export-btn:hover:not(:disabled) {
+  background: #9070fd;
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(234, 179, 8, 0.5);
+  box-shadow: 0 4px 16px rgba(124, 92, 252, 0.5);
 }
 
-.btn-icon-export:disabled {
-  background: var(--bg-secondary);
-  color: var(--text-muted);
+.ac-export-btn:disabled {
+  background: var(--ac-bg-elevated);
+  color: var(--ac-text-muted);
   box-shadow: none;
-  opacity: 0.5;
   cursor: not-allowed;
+  opacity: 0.6;
   transform: none;
 }
+
+/* ─── shared btn-icon classes (still used elsewhere) ─────── */
 
 /* ─── TOOLBAR (Top Icon Bar) ─────────────────────────────── */
 .toolbar {
