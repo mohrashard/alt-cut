@@ -217,202 +217,218 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
   // Render
   // ──────────────────────────────────────────────────────────
   return (
-    <div className="panel-right">
-      <div className="panel-right-header">Details</div>
-
-      <div className="panel-right-content">
-        {!selectedClip ? (
-          <div className="panel-empty">
-            <div style={{ fontSize: '28px' }}>🎞️</div>
-            <div style={{ fontWeight: 600, fontSize: '13px' }}>No clip selected</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Click a clip in the timeline to view and edit its properties.
+    <div className="prop-inspector">
+      {!selectedClip ? (
+        <div className="prop-empty">Select a clip to edit</div>
+      ) : (
+        <>
+          {/* ── Header ────────────────────────────────────── */}
+          <div className="prop-header">
+            <div className="prop-header-label">Inspector</div>
+            <div className="prop-header-title" title={selectedClip.file_path}>
+              {selectedClip.file_path?.split(/[/\\]/).pop() || 'Untitled Clip'}
             </div>
           </div>
-        ) : (
-          <>
-            {/* ── Clip Info ─────────────────────────────── */}
-            <div>
-              <div className="panel-section-label">Clip Info</div>
-              <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '8px' }}>
-                <div className="panel-row">
-                  <span className="panel-row-label">Name</span>
-                  <span className="panel-row-value" style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedClip.file_path}>
-                    {selectedClip.file_path?.split(/[/\\]/).pop()}
-                  </span>
+
+          {/* ── Content area (scrollable) ─────────────────── */}
+          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            
+            {/* ── Transform ───────────────────────────────── */}
+            <div className="prop-section">
+              <div className="prop-section-header">Transform</div>
+              
+              <div className="prop-slider-row">
+                <div className="prop-slider-label">Scale</div>
+                <div className="prop-slider-container">
+                  <input type="range" min="50" max="150" defaultValue="100" className="prop-range" />
                 </div>
-                <div className="panel-row">
-                  <span className="panel-row-label">Duration</span>
-                  <span className="panel-row-value">{((selectedClip.end_time - selectedClip.start_time) || 0).toFixed(2)}s</span>
+                <div className="prop-slider-value">100%</div>
+              </div>
+
+              <div className="prop-slider-row">
+                <div className="prop-slider-label">Volume</div>
+                <div className="prop-slider-container">
+                  <input
+                    type="range"
+                    min="0"
+                    max="200"
+                    value={(selectedClip.audio_volume || 1.0) * 100}
+                    onChange={e => {
+                      const vol = parseFloat(e.target.value) / 100;
+                      db.setAudioVolume(selectedClip.id, vol).then(onTimelineChange);
+                    }}
+                    className="prop-range"
+                  />
                 </div>
-                <div className="panel-row">
-                  <span className="panel-row-label">Type</span>
-                  <span className="panel-row-value">{selectedClip.type || 'video'}</span>
-                </div>
+                <div className="prop-slider-value">{Math.round((selectedClip.audio_volume || 1.0) * 100)}%</div>
               </div>
             </div>
 
-            {/* ── AI Tools ──────────────────────────────── */}
-            <div>
-              <div className="panel-section-label">AI Tools</div>
+            {/* ── Effects ─────────────────────────────────── */}
+            <div className="prop-section">
+              <div className="prop-section-header">
+                Effects
+                {/* Reset button could go here as an action link if needed */}
+              </div>
+
+              <div className="prop-slider-row">
+                <div className="prop-slider-label">Brightness</div>
+                <div className="prop-slider-container">
+                  <input
+                    type="range"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    value={localEffects.brightness}
+                    onChange={e => handleEffectChange('brightness', parseFloat(e.target.value))}
+                    className="prop-range"
+                  />
+                </div>
+                <div className="prop-slider-value">{localEffects.brightness.toFixed(1)}</div>
+              </div>
+
+              <div className="prop-slider-row">
+                <div className="prop-slider-label">Contrast</div>
+                <div className="prop-slider-container">
+                  <input
+                    type="range"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    value={localEffects.contrast}
+                    onChange={e => handleEffectChange('contrast', parseFloat(e.target.value))}
+                    className="prop-range"
+                  />
+                </div>
+                <div className="prop-slider-value">{localEffects.contrast.toFixed(1)}</div>
+              </div>
+
+              <div className="prop-slider-row">
+                <div className="prop-slider-label">Saturation</div>
+                <div className="prop-slider-container">
+                  <input
+                    type="range"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    value={localEffects.saturation}
+                    onChange={e => handleEffectChange('saturation', parseFloat(e.target.value))}
+                    className="prop-range"
+                  />
+                </div>
+                <div className="prop-slider-value">{localEffects.saturation.toFixed(1)}</div>
+              </div>
+
+              <div className="prop-slider-row">
+                <div className="prop-slider-label">Blur</div>
+                <div className="prop-slider-container">
+                  <input
+                    type="range"
+                    min="0"
+                    max="20"
+                    step="1"
+                    value={localEffects.blur}
+                    onChange={e => handleEffectChange('blur', parseInt(e.target.value, 10))}
+                    className="prop-range"
+                  />
+                </div>
+                <div className="prop-slider-value">{localEffects.blur}px</div>
+              </div>
+
+              <div className="prop-slider-row">
+                <div className="prop-slider-label">Sharpen</div>
+                <div className="prop-slider-container">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={localEffects.sharpen}
+                    onChange={e => handleEffectChange('sharpen', parseFloat(e.target.value))}
+                    className="prop-range"
+                  />
+                </div>
+                <div className="prop-slider-value">{localEffects.sharpen.toFixed(1)}</div>
+              </div>
+            </div>
+
+            {/* ── Transitions ─────────────────────────────── */}
+            <div className="prop-section">
+              <div className="prop-section-header">Transitions</div>
+              <div className="prop-chip-row">
+                {['None', 'Ink', 'Wipe', 'Shutter'].map(type => (
+                  <button
+                    key={type}
+                    className={`prop-chip ${type === 'None' ? 'prop-chip--active' : ''}`}
+                    onClick={() => {}} // Not wired yet per instructions to keep logic
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Typography ──────────────────────────────── */}
+            <div className="prop-section">
+              <div className="prop-section-header">Typography & Style</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-
-                {/* Caption generation */}
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Caption Generation</span>
-                    <StatusBadge status={captionStatus} />
-                  </div>
-                  <button
-                    className="ai-btn ai-btn-primary"
-                    style={{ width: '100%' }}
-                    onClick={() => handleRunAiJob('captions')}
-                    disabled={isCaptionBusy}
-                  >
-                    {isCaptionBusy
-                      ? <><span className="spin" style={{ display: 'inline-block' }}>⚙️</span> Transcribing + Chunking…</>
-                      : captionStatus === 'completed'
-                        ? '✅ Regenerate Captions'
-                        : '📝 Generate Captions'}
-                  </button>
-                  {captionStatus === 'completed' && (
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', textAlign: 'center' }}>
-                      Whisper → Gemma4 chunking → Live in preview
-                    </div>
-                  )}
-                </div>
-
-                {/* Denoise */}
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Audio Clean (DeepFilterNet)</span>
-                    <StatusBadge status={denoiseStatus} />
-                  </div>
-                  <button
-                    className="ai-btn ai-btn-secondary"
-                    style={{ width: '100%' }}
-                    onClick={() => handleRunAiJob('denoise')}
-                    disabled={isDenoiseBusy}
-                  >
-                    {isDenoiseBusy
-                      ? <><span className="spin" style={{ display: 'inline-block' }}>⚙️</span> Denoising Audio…</>
-                      : denoiseStatus === 'completed'
-                        ? '✅ Re-run Denoise'
-                        : '🎧 Clean & Remove Noise'}
-                  </button>
-                  {denoiseStatus === 'completed' && (
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', textAlign: 'center' }}>
-                      Clip now points to denoised video
-                    </div>
-                  )}
-                </div>
+                <select className="prop-select" style={{ width: '100%' }} value={features.fontFamily} onChange={e => updateSelect('fontFamily', e.target.value)}>
+                  <option value="Arial">Arial</option>
+                  <option value="Impact">Impact</option>
+                  <option value="Proxima Nova">Proxima Nova</option>
+                </select>
+                <select className="prop-select" style={{ width: '100%' }} value={features.animationStyle} onChange={e => updateSelect('animationStyle', e.target.value)}>
+                  <option value="hormozi">Hormozi Pop (yellow)</option>
+                  <option value="karaoke">Karaoke Flow (green)</option>
+                </select>
               </div>
             </div>
 
-            {/* ── Process Log ───────────────────────────── */}
-            {log && (
-              <div>
-                <div className="panel-section-label">Process Log</div>
+            {/* ── AI Tools ────────────────────────────────── */}
+            <div className="prop-section">
+              <div className="prop-section-header">
+                AI Tools
+                <StatusBadge status={captionStatus || denoiseStatus} />
+              </div>
+              <div className="prop-ai-btn-row">
+                <button
+                  className="prop-ai-btn"
+                  onClick={() => handleRunAiJob('captions')}
+                  disabled={isCaptionBusy}
+                >
+                  <div className="prop-dot prop-dot--purple" />
+                  {isCaptionBusy ? 'Busy...' : 'Captions'}
+                </button>
+                <button
+                  className="prop-ai-btn"
+                  onClick={() => handleRunAiJob('denoise')}
+                  disabled={isDenoiseBusy}
+                >
+                  <div className="prop-dot prop-dot--green" />
+                  {isDenoiseBusy ? 'Busy...' : 'Denoise'}
+                </button>
+              </div>
+              {log && (
                 <pre style={{
-                  background: 'var(--bg-main)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--ac-bg-overlay)',
+                  borderRadius: '6px',
                   padding: '8px',
                   fontSize: '10px',
-                  color: 'var(--text-secondary)',
-                  maxHeight: '120px',
+                  color: 'var(--ac-text-muted)',
+                  marginTop: '12px',
+                  maxHeight: '100px',
                   overflowY: 'auto',
                   whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                  lineHeight: 1.5,
+                  border: '1px solid var(--ac-border-subtle)'
                 }}>
                   {log}
                 </pre>
-              </div>
-            )}
-
-            {/* ── Typography & Style ────────────────────── */}
-            <div>
-              <div className="panel-section-label">Typography & Style</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Font Family</div>
-                  <select className="prop-select" value={features.fontFamily} onChange={e => updateSelect('fontFamily', e.target.value)}>
-                    <option value="Arial">Arial</option>
-                    <option value="Impact">Impact</option>
-                    <option value="Proxima Nova">Proxima Nova</option>
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Caption Style</div>
-                  <select className="prop-select" value={features.animationStyle} onChange={e => updateSelect('animationStyle', e.target.value)}>
-                    <option value="hormozi">Hormozi Pop (yellow highlight)</option>
-                    <option value="karaoke">Karaoke Flow (neon green)</option>
-                  </select>
-                </div>
-              </div>
+              )}
             </div>
 
-            {/* ── Transform ─────────────────────────────── */}
-            <div>
-              <div className="panel-section-label">Transform</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Scale</span><span>100%</span>
-                  </div>
-                  <input type="range" min="50" max="150" defaultValue="100" className="prop-range" />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Volume</span><span>100%</span>
-                  </div>
-                  <input type="range" min="0" max="200" defaultValue="100" className="prop-range" />
-                </div>
-              </div>
-            </div>
-
-            {/* ── Effects ─────────────────────────────── */}
-            {selectedClip.effects !== undefined && (
-              <details style={{ marginTop: '16px' }}>
-                <summary className="panel-section-label" style={{ cursor: 'pointer', userSelect: 'none' }}>Effects</summary>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Brightness</span><span>{localEffects.brightness.toFixed(1)}</span>
-                    </div>
-                    <input type="range" min="0" max="2" step="0.1" value={localEffects.brightness} onChange={e => handleEffectChange('brightness', parseFloat(e.target.value))} className="prop-range" />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Contrast</span><span>{localEffects.contrast.toFixed(1)}</span>
-                    </div>
-                    <input type="range" min="0" max="2" step="0.1" value={localEffects.contrast} onChange={e => handleEffectChange('contrast', parseFloat(e.target.value))} className="prop-range" />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Saturation</span><span>{localEffects.saturation.toFixed(1)}</span>
-                    </div>
-                    <input type="range" min="0" max="2" step="0.1" value={localEffects.saturation} onChange={e => handleEffectChange('saturation', parseFloat(e.target.value))} className="prop-range" />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Blur</span><span>{localEffects.blur}px</span>
-                    </div>
-                    <input type="range" min="0" max="20" step="1" value={localEffects.blur} onChange={e => handleEffectChange('blur', parseInt(e.target.value, 10))} className="prop-range" />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Sharpen</span><span>{localEffects.sharpen.toFixed(1)}</span>
-                    </div>
-                    <input type="range" min="0" max="1" step="0.1" value={localEffects.sharpen} onChange={e => handleEffectChange('sharpen', parseFloat(e.target.value))} className="prop-range" />
-                  </div>
-                </div>
-              </details>
-            )}
-          </>
-        )}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

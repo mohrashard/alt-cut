@@ -106,13 +106,14 @@ export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded, highlig
   ];
 
   return (
-    <div className="sidebar">
-      {/* Nav Tabs */}
-      <div className="sidebar-nav">
+    <div className="ms-panel">
+
+      {/* ── Tab strip ─────────────────────────────────── */}
+      <div className="ms-tabs">
         {navItems.map(item => (
           <button
             key={item.id}
-            className={`sidebar-nav-item ${activeNav === item.id ? 'active' : ''}`}
+            className={`ms-tab${activeNav === item.id ? ' ms-tab--active' : ''}`}
             onClick={() => setActiveNav(item.id)}
           >
             {item.label}
@@ -120,57 +121,66 @@ export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded, highlig
         ))}
       </div>
 
+      {/* ── Search bar ────────────────────────────────── */}
+      <div className="ms-search-wrap">
+        <span className="ms-search-icon">⌕</span>
+        <input
+          className="ms-search-input"
+          type="text"
+          placeholder="Search media…"
+          readOnly
+        />
+      </div>
+
+      {/* ── Media tab ─────────────────────────────────── */}
       {activeNav === 'media' && (
-        <div className="sidebar-content">
+        <div className="ms-content">
           {/* Import Zone */}
           <button
-            className={`import-zone ${isDragging ? 'dragging' : ''}`}
+            className={`ms-import-zone${isDragging ? ' ms-import-zone--active' : ''}`}
             onClick={handleImport}
           >
-            <div className="import-zone-icon">
-              <UploadIcon />
-            </div>
-            <h3>Import</h3>
-            <p>Drag and drop videos, photos, and audio files here</p>
+            <div className="ms-import-icon"><UploadIcon /></div>
+            <span className="ms-import-title">Import media</span>
+            <span className="ms-import-sub">or drag &amp; drop files here</span>
           </button>
 
-          {/* No media hint */}
+          {/* Grid of assets */}
           {mediaItems.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', padding: '12px 0' }}>
-              No media? Import files to get started.
+            <div className="ms-empty">
+              No media yet — click Import to get started.
             </div>
           ) : (
             <>
-              <div className="sidebar-section-title">Your Media</div>
-              {mediaItems.map(item => (
-                <DraggableAsset
-                  key={item.id}
-                  item={item}
-                  isHighlighted={item.id === highlightAssetId}
-                  highlightRef={item.id === highlightAssetId ? highlightRef : undefined}
-                  onClick={() => { onMediaSelected(item.file_path); onHighlightClear?.(); }}
-                />
-              ))}
+              <div className="ms-section-label">Your Media</div>
+              <div className="ms-grid">
+                {mediaItems.map(item => (
+                  <DraggableAsset
+                    key={item.id}
+                    item={item}
+                    isHighlighted={item.id === highlightAssetId}
+                    highlightRef={item.id === highlightAssetId ? highlightRef : undefined}
+                    onClick={() => { onMediaSelected(item.file_path); onHighlightClear?.(); }}
+                  />
+                ))}
+              </div>
             </>
           )}
         </div>
       )}
 
       {activeNav === 'audio' && (
-        <div className="sidebar-content">
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', padding: '24px 0' }}>
-            🎵 Import audio files from the Media tab.
-          </div>
+        <div className="ms-content">
+          <div className="ms-empty">🎵 Import audio files from the Media tab.</div>
         </div>
       )}
 
       {activeNav === 'text' && (
-        <div className="sidebar-content">
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', padding: '24px 0' }}>
-            📝 Captions are generated via the AI tools panel.
-          </div>
+        <div className="ms-content">
+          <div className="ms-empty">📝 Captions are generated via the AI tools panel.</div>
         </div>
       )}
+
     </div>
   );
 }
@@ -194,27 +204,36 @@ function DraggableAsset({ item, onClick, isHighlighted, highlightRef }: {
   const isVideo = ['mp4', 'mov', 'mkv', 'avi'].includes(ext);
   const isAudio = ['mp3', 'wav', 'aac'].includes(ext);
 
+  const filename = item.file_path.split(/[/\\]/).pop() ?? '';
+  const durationLabel = item.duration > 0 ? `${item.duration.toFixed(1)}s` : '';
+
   return (
     <div
       ref={el => {
         setNodeRef(el);
         if (highlightRef) (highlightRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
       }}
-      className={`asset-item ${isDragging ? 'dragging' : ''} ${isHighlighted ? 'asset-highlighted' : ''}`}
+      className={`ms-card${isDragging ? ' ms-card--dragging' : ''}${isHighlighted ? ' ms-card--highlighted' : ''}`}
       style={style}
       {...listeners}
       {...attributes}
       onDoubleClick={onClick}
       title={item.file_path}
     >
-      <div className="asset-thumb">
-        {isVideo ? '🎥' : isAudio ? '🎵' : '🖼️'}
-      </div>
-      <div className="asset-info">
-        <div className="asset-name">{item.file_path.split(/[/\\]/).pop()}</div>
-        <div className="asset-meta">
-          {item.duration > 0 ? `${item.duration.toFixed(1)}s` : 'Unknown duration'}
-          {' · '}{isVideo ? 'Video' : isAudio ? 'Audio' : 'Image'}
+      {/* Thumbnail area */}
+      <div className="ms-card-thumb">
+        <span className="ms-card-type-icon">
+          {isVideo ? '🎥' : isAudio ? '🎵' : '🖼️'}
+        </span>
+
+        {/* Duration badge — top right */}
+        {durationLabel && (
+          <span className="ms-card-duration">{durationLabel}</span>
+        )}
+
+        {/* Filename gradient overlay — bottom */}
+        <div className="ms-card-label-wrap">
+          <span className="ms-card-label">{filename}</span>
         </div>
       </div>
     </div>

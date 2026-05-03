@@ -58,8 +58,8 @@ export function TimelineToolbar({
           justify-content: space-between;
           height: 36px;
           padding: 0 8px;
-          background: #1a1a1f;
-          border-bottom: 1px solid rgba(255,255,255,0.07);
+          background: var(--ac-bg-panel, #141416);
+          border-bottom: 1px solid var(--ac-border, #1e1e22);
           gap: 2px;
           user-select: none;
           flex-shrink: 0;
@@ -74,7 +74,7 @@ export function TimelineToolbar({
         .tl-sep {
           width: 1px;
           height: 18px;
-          background: rgba(255,255,255,0.1);
+          background: var(--ac-border-subtle, #252529);
           margin: 0 5px;
           flex-shrink: 0;
         }
@@ -91,10 +91,10 @@ export function TimelineToolbar({
           justify-content: center;
           width: 28px;
           height: 26px;
-          border: none;
+          border: 1px solid var(--ac-border-subtle, #252529);
           border-radius: 5px;
-          background: transparent;
-          color: #a0a0b0;
+          background: var(--ac-bg-elevated, #1a1a1e);
+          color: var(--ac-text-secondary, #888888);
           cursor: pointer;
           transition: background 0.12s, color 0.12s, opacity 0.12s;
           padding: 0;
@@ -106,11 +106,11 @@ export function TimelineToolbar({
           display: block;
         }
         .tl-b:hover:not(:disabled) {
-          background: rgba(255,255,255,0.08);
-          color: #e8e8f0;
+          background: var(--ac-border, #1e1e22);
+          color: var(--ac-text-primary, #e2e2e8);
         }
         .tl-b:active:not(:disabled) {
-          background: rgba(255,255,255,0.12);
+          background: var(--ac-accent-dim, #1e1a2e);
           transform: scale(0.93);
         }
         .tl-b:disabled {
@@ -118,50 +118,53 @@ export function TimelineToolbar({
           cursor: default;
         }
 
-        /* Active / toggled state */
+        /* Active / toggled state — purple accent */
         .tl-b.is-on {
-          background: rgba(99, 179, 237, 0.14);
-          color: #63b3ed;
+          background: var(--ac-accent-dim, #1e1a2e);
+          color: var(--ac-accent, #7c5cfc);
+          border-color: rgba(124, 92, 252, 0.3);
         }
         .tl-b.is-on:hover:not(:disabled) {
-          background: rgba(99, 179, 237, 0.22);
-          color: #90cdf4;
+          background: #261e40;
+          color: var(--ac-accent-text, #a08dfc);
         }
 
         /* Accent buttons (split, marker) */
         .tl-b.accent-split {
           color: #f6ad55;
+          border-color: rgba(246, 173, 85, 0.2);
         }
         .tl-b.accent-split:hover:not(:disabled) {
-          background: rgba(246,173,85,0.12);
+          background: rgba(246,173,85,0.1);
           color: #fbd38d;
         }
         .tl-b.accent-marker {
           color: #fc8181;
+          border-color: rgba(252, 129, 129, 0.2);
         }
         .tl-b.accent-marker:hover:not(:disabled) {
-          background: rgba(252,129,129,0.12);
+          background: rgba(252,129,129,0.1);
           color: #feb2b2;
         }
 
         /* Add button — slightly wider */
         .tl-b.tl-b-add {
           width: 32px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.1);
-          color: #c0c0d0;
+          background: var(--ac-bg-elevated, #1a1a1e);
+          border: 1px solid var(--ac-border-subtle, #252529);
+          color: var(--ac-text-secondary, #888888);
         }
         .tl-b.tl-b-add:hover {
-          background: rgba(255,255,255,0.1);
-          border-color: rgba(255,255,255,0.18);
-          color: #e8e8f0;
+          background: var(--ac-border, #1e1e22);
+          border-color: var(--ac-border, #1e1e22);
+          color: var(--ac-text-primary, #e2e2e8);
         }
 
         /* Select tool — shows as "pressed" */
         .tl-b.tl-b-select {
-          background: rgba(255,255,255,0.07);
-          color: #e8e8f0;
-          border: 1px solid rgba(255,255,255,0.12);
+          background: var(--ac-accent-dim, #1e1a2e);
+          color: var(--ac-accent, #7c5cfc);
+          border: 1px solid rgba(124, 92, 252, 0.3);
         }
 
         /* Tooltip */
@@ -174,9 +177,9 @@ export function TimelineToolbar({
           white-space: nowrap;
           font-size: 10px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          color: #e8e8f0;
-          background: #2d2d3a;
-          border: 1px solid rgba(255,255,255,0.1);
+          color: var(--ac-text-primary, #e2e2e8);
+          background: var(--ac-bg-elevated, #1a1a1e);
+          border: 1px solid var(--ac-border-subtle, #252529);
           border-radius: 4px;
           padding: 3px 7px;
           pointer-events: none;
@@ -191,7 +194,7 @@ export function TimelineToolbar({
           width: 72px;
           height: 3px;
           border-radius: 2px;
-          background: rgba(255,255,255,0.15);
+          background: var(--ac-border-subtle, #252529);
           outline: none;
           cursor: pointer;
           margin: 0 4px;
@@ -202,21 +205,21 @@ export function TimelineToolbar({
           width: 11px;
           height: 11px;
           border-radius: 50%;
-          background: #63b3ed;
+          background: var(--ac-accent, #7c5cfc);
           cursor: pointer;
-          box-shadow: 0 0 0 2px rgba(99,179,237,0.25);
+          box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.25);
           transition: transform 0.1s, box-shadow 0.1s;
         }
         .tl-zoom-slider-pro:hover::-webkit-slider-thumb {
           transform: scale(1.2);
-          box-shadow: 0 0 0 4px rgba(99,179,237,0.2);
+          box-shadow: 0 0 0 4px rgba(124, 92, 252, 0.2);
         }
         .tl-zoom-slider-pro::-moz-range-thumb {
           width: 11px;
           height: 11px;
           border-radius: 50%;
           border: none;
-          background: #63b3ed;
+          background: var(--ac-accent, #7c5cfc);
           cursor: pointer;
         }
 
@@ -226,9 +229,9 @@ export function TimelineToolbar({
           font-size: 11px;
           font-weight: 500;
           letter-spacing: 0.03em;
-          color: #c0c0d0;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.08);
+          color: var(--ac-text-muted, #555);
+          background: var(--ac-bg-elevated, #1a1a1e);
+          border: 1px solid var(--ac-border-subtle, #252529);
           border-radius: 5px;
           padding: 3px 9px;
           min-width: 108px;
@@ -237,10 +240,10 @@ export function TimelineToolbar({
           flex-shrink: 0;
         }
         .tl-timecode-pro .tc-current {
-          color: #e8e8f0;
+          color: var(--ac-text-primary, #e2e2e8);
         }
         .tl-timecode-pro .tc-sep {
-          color: rgba(255,255,255,0.25);
+          color: var(--ac-border, #1e1e22);
           margin: 0 2px;
         }
       `}</style>

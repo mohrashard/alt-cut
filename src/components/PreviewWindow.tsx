@@ -30,6 +30,9 @@ export function PreviewWindow({
   const [isDragging, setIsDragging] = useState(false);
   const [transitions, setTransitions] = useState<Transition[]>([]);
 
+  const previewTimecodeRef = useRef<HTMLSpanElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
   useEffect(() => {
     import('../lib/db').then(db => {
       db.getAllTransitions().then(setTransitions);
@@ -38,7 +41,6 @@ export function PreviewWindow({
 
   // ── RAF loop: pure DOM mutation, zero React state updates during playback ──
   useEffect(() => {
-    // Pre-compute a formatter that mirrors Timeline's fmt() for the timecode display
     const fmtTime = (s: number) => {
       const m  = Math.floor(s / 60);
       const ss = Math.floor(s % 60);
@@ -56,43 +58,50 @@ export function PreviewWindow({
           engineTimeRef.current = sec;
         }
 
-        // Only update the DOM position when the user is NOT actively dragging the handle.
-        // TimelinePlayhead sets data-playhead-dragging="true" during drag to signal this.
         if (playheadDomRef?.current && !playheadDomRef.current.dataset.playheadDragging) {
           playheadDomRef.current.style.left = `${sec * pps}px`;
         }
 
-        // 2. Update timecode text directly — no setState, no re-render
+        const text = `${fmtTime(sec)} / ${fmtTime(videoDuration)}`;
         if (timecodeDomRef?.current) {
-          timecodeDomRef.current.textContent = `${fmtTime(sec)} / ${fmtTime(videoDuration)}`;
+          timecodeDomRef.current.textContent = text;
         }
-
-        // 3. Only sync React state when player STOPS (so ruler/toolbar stay correct)
-        // This is handled by the Remotion Player's onPause callback below.
+        if (previewTimecodeRef.current) {
+          previewTimecodeRef.current.textContent = text;
+        }
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [playheadDomRef, timecodeDomRef, pps, videoDuration]);
+  }, [playheadDomRef, timecodeDomRef, pps, videoDuration, engineTimeRef]);
 
   // ── Sync React state on pause only (via Remotion's event API) ──
   useEffect(() => {
     const player = playerRef.current;
     if (!player) return;
+    
     const onPause = () => {
+      setIsPlaying(false);
       if (onPlayheadChange) {
         onPlayheadChange(player.getCurrentFrame() / 30);
       }
     };
+    
+    const onPlay = () => setIsPlaying(true);
+
     player.addEventListener('pause', onPause);
-    return () => player.removeEventListener('pause', onPause);
+    player.addEventListener('play', onPlay);
+    return () => {
+      player.removeEventListener('pause', onPause);
+      player.removeEventListener('play', onPlay);
+    };
   }, [onPlayheadChange]);
 
   // ── External seek (ruler click / drag): seek the player when paused ──
   useEffect(() => {
     if (!playerRef.current || videoDuration <= 0) return;
-    if (playerRef.current.isPlaying()) return; // absolute guard: never interrupt active playback
+    if (playerRef.current.isPlaying()) return; 
     const frame = Math.round(playheadSeconds * 30);
     const current = playerRef.current.getCurrentFrame();
     if (Math.abs(current - frame) > 1) {
@@ -100,7 +109,6 @@ export function PreviewWindow({
     }
   }, [playheadSeconds, videoDuration]);
 
-  // Convert local file paths to asset:// URLs for Remotion preview
   const previewClips = useMemo(() => clips.map(clip => ({
     ...clip,
     previewSrc: clip.file_path ? convertFileSrc(clip.file_path) : null,
@@ -145,21 +153,38 @@ export function PreviewWindow({
   };
 
   const hasCaptions = clips.some(c => c.ai_metadata?.['captions']?.status === 'completed');
-  const hasDenoise  = clips.some(c => c.ai_metadata?.['denoise']?.status === 'completed');
+  
+  const togglePlay = () => {
+    if (playerRef.current?.isPlaying()) {
+      playerRef.current?.pause();
+    } else {
+      playerRef.current?.play();
+    }
+  };
+
+  const skipBack = () => {
+    const p = playerRef.current;
+    if (p) p.seekTo(Math.max(0, p.getCurrentFrame() - 30));
+  };
+
+  const skipForward = () => {
+    const p = playerRef.current;
+    if (p) p.seekTo(Math.min(playerDuration, p.getCurrentFrame() + 30));
+  };
 
   return (
     <div className="preview-area">
-      <div className="preview-bg-text">ALT·CUT</div>
+      {clips.length > 0 ? (
+        <div className="pw-layout">
+          <div className="pw-info-strip">1080×1920  ·  30 FPS</div>
 
-      <div
-        className={`preview-player-wrap ${isDragging ? 'dragging' : ''}`}
-        ref={containerRef}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-      >
-        {clips.length > 0 ? (
-          <>
+          <div
+            className={`pw-player-wrapper ${isDragging ? 'dragging' : ''}`}
+            ref={containerRef}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
             <Player
               ref={playerRef}
               component={HormoziCaptions as any}
@@ -168,8 +193,8 @@ export function PreviewWindow({
               compositionWidth={1080}
               compositionHeight={1920}
               fps={30}
-              style={{ width: '240px', height: '427px' }}
-              controls={!isDragging}
+              style={{ width: '200px', height: '356px' }}
+              controls={false}
               autoPlay
               loop
             />
@@ -214,28 +239,39 @@ export function PreviewWindow({
                 )}
               </div>
             )}
-
-            <div className="preview-badges">
-              <span className="preview-badge">1080×1920</span>
-              <span className="preview-badge">30 FPS</span>
-              {hasCaptions && (
-                <span className="preview-badge" style={{ borderColor: '#ffcc00', color: '#ffcc00' }}>📝 CC</span>
-              )}
-              {hasDenoise && (
-                <span className="preview-badge" style={{ borderColor: '#10b981', color: '#10b981' }}>🎧 Clean</span>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="preview-empty">
-            <div className="preview-empty-icon">🎬</div>
-            <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-secondary)' }}>No clips yet</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Import a video from the media panel, then drag it into the timeline below.
-            </div>
           </div>
-        )}
-      </div>
+
+          <div className="pw-controls">
+            <button className="pw-btn" onClick={skipBack} title="Back 1s">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
+            </button>
+            
+            <button className="pw-btn-play" onClick={togglePlay} title="Play/Pause">
+              {isPlaying ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '2px' }}><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              )}
+            </button>
+            
+            <button className="pw-btn" onClick={skipForward} title="Forward 1s">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
+            </button>
+            
+            <span className="pw-timecode" ref={previewTimecodeRef}>00:00.0 / 00:00.0</span>
+          </div>
+
+        </div>
+      ) : (
+        <div className="preview-empty">
+          <div className="preview-empty-icon">🎬</div>
+          <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-secondary)' }}>No clips yet</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginTop: '4px' }}>
+            Import a video from the media panel, then drag it into the timeline below.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
