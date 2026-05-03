@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { TimelineClip, CaptionStyle } from '../lib/db';
 import * as db from '../lib/db';
@@ -7,7 +7,6 @@ import { CaptionStyleEditor } from './CaptionStyleEditor';
 
 export interface AppFeatures {
   fontFamily: string;
-  animationStyle: string;
   captionX: number; // Percentage offset from center (0 = center)
   captionY: number; // Percentage from top (0-100)
 }
@@ -44,7 +43,6 @@ function StatusBadge({ status }: { status?: string }) {
 export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChange }: PropertiesProps) {
   const [features, setFeatures] = useState<AppFeatures>({
     fontFamily: 'Arial',
-    animationStyle: 'hormozi',
     captionX: 0,
     captionY: 80, // Default to bottom area
   });
@@ -67,16 +65,36 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
   const [localCaptionStyle, setLocalCaptionStyle] = useState<CaptionStyle>(parsedCaptionStyle);
 
   // Sync when clip changes
+  const prevClipIdRef = useRef<number | string | undefined>(undefined);
   useEffect(() => {
-    setLocalCaptionStyle(parsedCaptionStyle);
-  }, [parsedCaptionStyle]);
+    if (selectedClip?.id !== prevClipIdRef.current) {
+      setLocalCaptionStyle(parsedCaptionStyle);
+      prevClipIdRef.current = selectedClip?.id;
+    }
+  }, [parsedCaptionStyle, selectedClip?.id]);
 
-  const handleCaptionStyleChange = async (newStyle: CaptionStyle) => {
-    if (!selectedClip) return;
+  const clipIdRef = useRef<number | string | null>(null);
+  const debounceTimerRef = useRef<number | null>(null);
+
+  const handleCaptionStyleChange = useCallback((newStyle: CaptionStyle) => {
+    const currentClipId = selectedClip?.id;
+    if (!currentClipId) return;
     setLocalCaptionStyle(newStyle);
-    await db.updateCaptionStyle(selectedClip.id, newStyle);
-    onTimelineChange();
-  };
+
+    clipIdRef.current = currentClipId;
+
+    if (debounceTimerRef.current) {
+      window.clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = window.setTimeout(async () => {
+      if (clipIdRef.current !== currentClipId) {
+        return;
+      }
+      await db.updateCaptionStyle(currentClipId, newStyle);
+      onTimelineChange();
+    }, 300);
+  }, [selectedClip?.id, onTimelineChange]);
 
   // ──────────────────────────────────────────────────────────
   // Main AI job handler
@@ -134,7 +152,14 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
         await db.upsertAiMetadata(clipId, step, 'completed', rawJson);
         
         // Clear old text clips to prevent duplicates on regenerate
-        await db.clearTextClips(selectedClip.project_id);
+        // TODO: Add parent_clip_id to timeline_clips schema for proper hierarchy tracking.
+        // For now, filter the deletion by track_lane === 0 and timeline_start within the selectedClip's bounds.
+        const clipDuration = selectedClip.end_time - selectedClip.start_time;
+        await db.clearTextClipsWithinBounds(
+          selectedClip.project_id, 
+          selectedClip.timeline_start, 
+          selectedClip.timeline_start + clipDuration
+        );
 
         const clipStart = selectedClip.start_time;
         const clipEnd = selectedClip.end_time;

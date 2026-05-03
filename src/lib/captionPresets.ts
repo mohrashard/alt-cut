@@ -77,10 +77,14 @@ export const CAPTION_PRESETS: CaptionStyle[] = [
 
 /** Returns the preset matching `name`, or the 'hormozi' preset as a fallback. */
 export function getPreset(name: string): CaptionStyle {
-  return (
-    CAPTION_PRESETS.find((p) => p.preset === name) ??
-    CAPTION_PRESETS[0] // hormozi is the default
-  );
+  const fallback = CAPTION_PRESETS[0]; // hormozi is the default
+  const preset = CAPTION_PRESETS.find((p) => p.preset === name) ?? fallback;
+
+  if (!['pop', 'fade', 'none'].includes(preset.animation)) {
+    return { ...preset, animation: fallback.animation };
+  }
+
+  return preset;
 }
 
 /**
@@ -90,11 +94,15 @@ export function getPreset(name: string): CaptionStyle {
  */
 export function parseCaptionStyle(raw: string | null | undefined): CaptionStyle {
   const fallback = CAPTION_PRESETS[0]; // hormozi
-  if (!raw) return fallback;
+  if (!raw || raw === '{}') return fallback;
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-      return { ...fallback, ...parsed } as CaptionStyle;
+      const merged = { ...fallback, ...parsed } as CaptionStyle;
+      if (!['pop', 'fade', 'none'].includes(merged.animation)) {
+        merged.animation = fallback.animation;
+      }
+      return merged;
     }
   } catch {
     // fall through to fallback

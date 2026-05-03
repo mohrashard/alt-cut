@@ -119,7 +119,6 @@ export function PreviewWindow({
       clips: previewClips,
       transitions,
       fontFamily: features?.fontFamily || 'Arial',
-      animationStyle: features?.animationStyle || 'hormozi',
       captionX: features?.captionX || 0,
       captionY: features?.captionY || 80,
     };

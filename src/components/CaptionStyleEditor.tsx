@@ -22,6 +22,10 @@ function patch<K extends keyof CaptionStyle>(
   onChange({ ...current, [key]: value });
 }
 
+function isValidHex(color: string): boolean {
+  return /^#[0-9A-Fa-f]{6}$/i.test(color);
+}
+
 // Readable labels for the animation chip buttons
 const ANIMATION_OPTIONS: { value: CaptionStyle['animation']; label: string }[] = [
   { value: 'pop',  label: 'Pop'  },
@@ -170,10 +174,11 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 /** A styled <input type="range"> */
 function RangeInput({
-  min, max, step = 1, value, onChange,
+  min, max, step = 1, value, onChange, formatValue = String,
 }: {
   min: number; max: number; step?: number; value: number;
   onChange: (v: number) => void;
+  formatValue?: (v: number) => string;
 }) {
   return (
     <>
@@ -194,7 +199,7 @@ function RangeInput({
         textAlign:    'right',
         fontVariantNumeric: 'tabular-nums',
       }}>
-        {value}
+        {formatValue(value)}
       </span>
     </>
   );
@@ -212,7 +217,7 @@ function ColorInput({
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
       <input
         type="color"
-        value={value.startsWith('#') ? value : '#ffffff'}
+        value={isValidHex(value) ? value : '#ffffff'}
         onChange={e => onChange(e.target.value)}
         style={{
           width:        '28px',
@@ -402,6 +407,7 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
             min={0} max={100} step={1}
             value={Math.round(s.bgOpacity * 100)}
             onChange={v => set('bgOpacity', v / 100)}
+            formatValue={v => `${v}%`}
           />
         </Row>
         <Row label="Animation">

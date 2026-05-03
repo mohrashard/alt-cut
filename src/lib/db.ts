@@ -200,7 +200,7 @@ export async function runMigrations(): Promise<void> {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN effects TEXT DEFAULT '{}'`);
   } catch { /* column already exists */ }
   try {
-    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN caption_style TEXT DEFAULT '{}'`);
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN caption_style TEXT DEFAULT NULL`);
   } catch { /* column already exists */ }
 
   await db.execute(`
@@ -365,9 +365,44 @@ export async function updateClipEffects(clipId: number, effects: ClipEffects): P
   await db.execute('UPDATE timeline_clips SET effects=$1 WHERE id=$2', [JSON.stringify(effects), clipId]);
 }
 
+function sanitizeCaptionStyle(obj: any, key?: string): any {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'number') {
+    if (Number.isFinite(obj)) return obj;
+    switch (key) {
+      case 'fontSize': return 72;
+      case 'strokeWidth': return 3;
+      case 'glowSize': return 0;
+      case 'bgOpacity': return 0;
+      default: return 0;
+    }
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeCaptionStyle(item));
+  }
+  if (typeof obj === 'object') {
+    const sanitized: any = {};
+    for (const k in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) {
+        sanitized[k] = sanitizeCaptionStyle(obj[k], k);
+      }
+    }
+    return sanitized;
+  }
+  return obj;
+}
+
 export async function updateCaptionStyle(clipId: number, style: CaptionStyle): Promise<void> {
   const db = await getDb();
-  await db.execute('UPDATE timeline_clips SET caption_style=$1 WHERE id=$2', [JSON.stringify(style), clipId]);
+  let styleStr = '';
+  try {
+    const sanitized = sanitizeCaptionStyle(style);
+    styleStr = JSON.stringify(sanitized);
+  } catch (error) {
+    console.error('Error stringifying caption style:', error);
+    return;
+  }
+  await db.execute('UPDATE timeline_clips SET caption_style=$1 WHERE id=$2', [styleStr, clipId]);
 }
 
 export async function setAudioVolume(clipId: number, volume: number): Promise<void> {
@@ -438,6 +473,14 @@ export async function clearTimelineClips(projectId: number): Promise<void> {
 export async function clearTextClips(projectId: number): Promise<void> {
   const db = await getDb();
   await db.execute('DELETE FROM timeline_clips WHERE project_id = $1 AND track_type = $2', [projectId, 'text']);
+}
+
+export async function clearTextClipsWithinBounds(projectId: number, minStart: number, maxStart: number): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    'DELETE FROM timeline_clips WHERE project_id = $1 AND track_type = $2 AND track_lane = 0 AND timeline_start >= $3 AND timeline_start <= $4',
+    [projectId, 'text', minStart, maxStart]
+  );
 }
 
 export async function updateTimelineOrder(clips: TimelineClip[]): Promise<void> {

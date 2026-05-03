@@ -1,3 +1,4 @@
+import React, { useMemo } from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, Video, Audio, Sequence, spring } from 'remotion';
 import { EffectWrapper } from './EffectWrapper';
 import { TransitionHandler } from './TransitionHandler';
@@ -14,11 +15,21 @@ const DEFAULT_EFFECTS: ClipEffects = {
 
 const secondsToFrame = (t: number, fps: number) => Math.floor(t * fps);
 
+const hexToRgba = (hex: string, opacity: number) => {
+  const c = hex.replace('#', '');
+  if (c.length === 3) {
+    return `rgba(${parseInt(c[0] + c[0], 16)}, ${parseInt(c[1] + c[1], 16)}, ${parseInt(c[2] + c[2], 16)}, ${opacity})`;
+  }
+  if (c.length === 6) {
+    return `rgba(${parseInt(c.slice(0, 2), 16)}, ${parseInt(c.slice(2, 4), 16)}, ${parseInt(c.slice(4, 6), 16)}, ${opacity})`;
+  }
+  return hex;
+};
+
 interface Props {
   clips: any[];
   transitions?: Transition[];
   fontFamily?: string;
-  animationStyle?: string;
   captionX?: number;
   captionY?: number;
 }
@@ -27,7 +38,6 @@ export const HormoziCaptions: React.FC<Props> = ({
   clips = [],
   transitions = [],
   fontFamily = 'Arial',
-  animationStyle = 'hormozi',
   captionX = 0,
   captionY = 80,
 }) => {
@@ -137,7 +147,6 @@ export const HormoziCaptions: React.FC<Props> = ({
                 <TextClip
                   clip={clip}
                   chunkData={chunkData}
-                  animationStyle={animationStyle}
                   captionX={captionX}
                   captionY={captionY}
                   fps={fps}
@@ -161,17 +170,18 @@ export const HormoziCaptions: React.FC<Props> = ({
 const TextClip: React.FC<{
   clip: any;
   chunkData: any;
-  animationStyle: string;
   captionX: number;
   captionY: number;
   fps: number;
-}> = ({ clip, chunkData, animationStyle, captionX, captionY, fps }) => {
+}> = ({ clip, chunkData, captionX, captionY, fps }) => {
   const frame = useCurrentFrame();
 
   // ── Resolve captionStyle from the clip's DB field, fall back to hormozi preset ──
-  const captionStyle: CaptionStyle = parseCaptionStyle(
-    typeof clip.caption_style === 'string' ? clip.caption_style : null
-  );
+  const captionStyle: CaptionStyle = useMemo(() => {
+    return parseCaptionStyle(
+      typeof clip.caption_style === 'string' ? clip.caption_style : null
+    );
+  }, [clip.caption_style]);
 
   // Convert sequence-local frame -> absolute video seconds
   // This absolute seconds matches the original audio timing if it was un-shifted.
@@ -183,11 +193,8 @@ const TextClip: React.FC<{
   // to the original chunk time [chunk.start, chunk.end] but shifted by clip.start_time.
 
   const sequenceLocalSeconds = frame / fps;
-  // The time within the asset's original file is clip.start_time + sequenceLocalSeconds.
-  // Whisper timestamps in chunkData.words are relative to the original video asset.
-  // Because the "asset" for a TextClip is the chunk itself, we must add chunkData.start.
-  const chunkStart = chunkData.start || 0;
-  const assetSeconds = chunkStart + clip.start_time + sequenceLocalSeconds;
+  // assetSeconds maps the current frame (relative to timeline_start) back to the original asset's time domain.
+  const assetSeconds = clip.start_time + sequenceLocalSeconds;
 
   // ── Build derived style values from captionStyle ───────────────────────────
   const resolvedFontFamily =
@@ -201,23 +208,94 @@ const TextClip: React.FC<{
       ? `${captionStyle.strokeWidth}px ${captionStyle.strokeColor}`
       : 'none';
 
-  // Glow text-shadow (only when glowSize > 0)
-  // The outer wrapper also keeps the classic Hormozi thick-black-shadow so we
-  // compose both together.  The glow is prepended so it appears on top.
   const buildTextShadow = () => {
-    const classicShadow = [
-      `4px 4px 0 ${captionStyle.strokeColor}`,
-      `-4px -4px 0 ${captionStyle.strokeColor}`,
-      `4px -4px 0 ${captionStyle.strokeColor}`,
-      `-4px 4px 0 ${captionStyle.strokeColor}`,
-      `0px 6px 0px ${captionStyle.strokeColor}`,
-      `0px 12px 20px rgba(0,0,0,0.8)`,
-    ].join(', ');
+    const shadows: string[] = [];
+
     if (captionStyle.glowSize > 0) {
-      return `0 0 ${captionStyle.glowSize}px ${captionStyle.glowColor}, ${classicShadow}`;
+      shadows.push(`0 0 ${captionStyle.glowSize}px ${captionStyle.glowColor}`);
     }
-    return classicShadow;
+
+    if (captionStyle.strokeWidth === 0) {
+      shadows.push(
+        `4px 4px 0 ${captionStyle.strokeColor}`,
+        `-4px -4px 0 ${captionStyle.strokeColor}`,
+        `4px -4px 0 ${captionStyle.strokeColor}`,
+        `-4px 4px 0 ${captionStyle.strokeColor}`,
+        `0px 6px 0px ${captionStyle.strokeColor}`
+      );
+    }
+    // If strokeWidth > 0, we omit the faux-stroke shadow entirely because 
+    // WebkitTextStroke handles the outline. This prevents a blurry double-stroke.
+
+    // Always append the drop shadow for depth
+    shadows.push(`0px 12px 20px rgba(0,0,0,0.8)`);
+
+    return shadows.join(', ');
   };
+
+  const renderedWords = useMemo(() => {
+    if (!chunkData.words || chunkData.words.length === 0) return null;
+
+    return chunkData.words.map((wordObj: any, idx: number) => {
+      const isActive =
+        assetSeconds >= wordObj.start && assetSeconds <= wordObj.end;
+
+      // Compute frame progress relative to this word's start time
+      const wordActiveFrames = (assetSeconds - wordObj.start) * fps;
+      
+      let scale = 1;
+      let rotate = 0;
+      let opacity = 1;
+
+      if (isActive && captionStyle.animation === 'pop') {
+        // Spring animation for aggressive pop — timing unchanged
+        const pop = spring({
+          fps,
+          frame: wordActiveFrames,
+          config: { damping: 10, mass: 0.5, stiffness: 200 },
+        });
+        scale = 1 + (pop * 0.25); // Scale up to 1.25x
+        rotate = pop * -4;        // Rotate slightly left
+      } else if (captionStyle.animation === 'fade') {
+        opacity = isActive ? 1 : 0.5;
+      } else if (captionStyle.animation === 'none') {
+        // No transforms
+      } else if (isActive) {
+        scale = 1.15;
+      }
+
+      // Active (highlighted) word colour comes from captionStyle
+      const activeColor = captionStyle.highlightColor;
+      // Inactive word colour comes from captionStyle.color
+      const inactiveColor = captionStyle.color;
+
+      // Per-word glow on the active word (uses captionStyle.glowSize / glowColor)
+      const wordFilter =
+        isActive && captionStyle.glowSize > 0
+          ? `drop-shadow(0 0 ${captionStyle.glowSize}px ${captionStyle.glowColor})`
+          : 'none';
+
+      return (
+        <span
+          key={wordObj.start ?? idx}
+          style={{
+            color:      isActive ? activeColor : inactiveColor,
+            background: isActive ? hexToRgba(captionStyle.bgColor, captionStyle.bgOpacity) : 'transparent',
+            transform: `scale(${scale}) rotate(${rotate}deg)`,
+            display:   'inline-block',
+            // Only apply CSS transitions for karaoke; hormozi is driven frame-by-frame
+            transition: captionStyle.animation === 'fade' ? 'opacity 0.2s ease, color 0.05s ease' : 'none',
+            filter:    wordFilter,
+            zIndex:    isActive ? 10 : 1,
+            position:  'relative',
+            opacity,
+          }}
+        >
+          {wordObj.word}
+        </span>
+      );
+    });
+  }, [chunkData.words, captionStyle, frame, assetSeconds, fps]);
 
   return (
     <AbsoluteFill
@@ -252,67 +330,8 @@ const TextClip: React.FC<{
           lineHeight: 1.15,
         }}
       >
-        {chunkData.words && chunkData.words.length > 0 ? (
-          chunkData.words.map((wordObj: any, idx: number) => {
-            const isActive =
-              assetSeconds >= wordObj.start && assetSeconds <= wordObj.end;
-
-            // Compute frame progress relative to this word's start time
-            const wordActiveFrames = (assetSeconds - wordObj.start) * fps;
-            
-            let scale = 1;
-            let rotate = 0;
-
-            if (isActive) {
-              if (animationStyle === 'hormozi') {
-                // Spring animation for aggressive pop — timing unchanged
-                const pop = spring({
-                  fps,
-                  frame: wordActiveFrames,
-                  config: { damping: 10, mass: 0.5, stiffness: 200 },
-                });
-                scale = 1 + (pop * 0.25); // Scale up to 1.25x
-                rotate = pop * -4;        // Rotate slightly left
-              } else {
-                scale = 1.15;
-              }
-            }
-
-            // Active (highlighted) word colour comes from captionStyle
-            const activeColor = captionStyle.highlightColor;
-            // Inactive word colour comes from captionStyle.color
-            const inactiveColor = captionStyle.color;
-
-            // Per-word glow on the active word (uses captionStyle.glowSize / glowColor)
-            const wordFilter =
-              isActive && captionStyle.glowSize > 0
-                ? `drop-shadow(0 0 ${captionStyle.glowSize}px ${captionStyle.glowColor})`
-                : 'none';
-
-            return (
-              <span
-                key={idx}
-                style={{
-                  color:      isActive ? activeColor : inactiveColor,
-                  // Apply a background chip to the active word only when the preset
-                  // explicitly opts in via bgOpacity > 0 (e.g. 'neon' preset).
-                  // For hormozi / karaoke the background stays transparent.
-                  background: isActive && captionStyle.bgOpacity > 0
-                    ? captionStyle.highlightColor
-                    : 'transparent',
-                  transform: `scale(${scale}) rotate(${rotate}deg)`,
-                  display:   'inline-block',
-                  // Only apply CSS transitions for karaoke; hormozi is driven frame-by-frame
-                  transition: animationStyle === 'karaoke' ? 'transform 0.08s ease-out, color 0.05s ease' : 'none',
-                  filter:    wordFilter,
-                  zIndex:    isActive ? 10 : 1,
-                  position:  'relative',
-                }}
-              >
-                {wordObj.word}
-              </span>
-            );
-          })
+        {renderedWords ? (
+          renderedWords
         ) : (
           <span style={{ color: captionStyle.color }}>{chunkData.text}</span>
         )}

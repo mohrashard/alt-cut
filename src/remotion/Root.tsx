@@ -17,7 +17,6 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{
           clips: [],
           fontFamily: 'Arial',
-          animationStyle: 'hormozi',
           captions: null,
         }}
       />
