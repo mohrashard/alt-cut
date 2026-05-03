@@ -3,7 +3,7 @@ import { Player, PlayerRef } from "@remotion/player";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { HormoziCaptions } from "../remotion/HormoziCaptions";
 import { AppFeatures } from "./PropertiesPanel";
-import type { TimelineClip } from "../lib/db";
+import type { TimelineClip, Transition } from "../lib/db";
 
 interface PreviewWindowProps {
   clips: TimelineClip[];
@@ -28,6 +28,13 @@ export function PreviewWindow({
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef    = useRef<PlayerRef>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [transitions, setTransitions] = useState<Transition[]>([]);
+
+  useEffect(() => {
+    import('../lib/db').then(db => {
+      db.getAllTransitions().then(setTransitions);
+    });
+  }, [clips]);
 
   // ── RAF loop: pure DOM mutation, zero React state updates during playback ──
   useEffect(() => {
@@ -99,13 +106,16 @@ export function PreviewWindow({
     previewSrc: clip.file_path ? convertFileSrc(clip.file_path) : null,
   })), [clips]);
 
-  const inputProps = useMemo(() => ({
-    clips: previewClips,
-    fontFamily: features?.fontFamily,
-    animationStyle: features?.animationStyle,
-    captionX: features?.captionX,
-    captionY: features?.captionY,
-  }), [previewClips, features]);
+  const inputProps = useMemo(() => {
+    return {
+      clips: previewClips,
+      transitions,
+      fontFamily: features?.fontFamily || 'Arial',
+      animationStyle: features?.animationStyle || 'hormozi',
+      captionX: features?.captionX || 0,
+      captionY: features?.captionY || 80,
+    };
+  }, [previewClips, features, transitions]);
 
   const playerDuration = Math.max(1, Math.round(videoDuration * 30));
 

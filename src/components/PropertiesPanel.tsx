@@ -1,7 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { TimelineClip } from '../lib/db';
+import type { TimelineClip, ClipEffects } from '../lib/db';
 import * as db from '../lib/db';
+
+const DEFAULT_EFFECTS: ClipEffects = {
+  brightness: 1.0,
+  contrast: 1.0,
+  saturation: 1.0,
+  blur: 0,
+  sharpen: 0,
+};
 
 export interface AppFeatures {
   fontFamily: string;
@@ -55,6 +63,30 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
 
   const updateSelect = (key: keyof AppFeatures, value: any) =>
     setFeatures(prev => ({ ...prev, [key]: value }));
+
+  // ── Effects State ─────────────────────────────────────────
+  const clipEffectsRaw = selectedClip?.effects;
+  const defaultParsedEffects = useMemo(() => {
+    try {
+      return { ...DEFAULT_EFFECTS, ...JSON.parse(clipEffectsRaw || '{}') };
+    } catch {
+      return DEFAULT_EFFECTS;
+    }
+  }, [clipEffectsRaw]);
+
+  const [localEffects, setLocalEffects] = useState<ClipEffects>(defaultParsedEffects);
+
+  useEffect(() => {
+    setLocalEffects(defaultParsedEffects);
+  }, [defaultParsedEffects]);
+
+  const handleEffectChange = async (key: keyof ClipEffects, value: number) => {
+    if (!selectedClip) return;
+    const newEffects = { ...localEffects, [key]: value };
+    setLocalEffects(newEffects);
+    await db.updateClipEffects(selectedClip.id, newEffects);
+    onTimelineChange();
+  };
 
   // ──────────────────────────────────────────────────────────
   // Main AI job handler
@@ -339,6 +371,45 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
                 </div>
               </div>
             </div>
+
+            {/* ── Effects ─────────────────────────────── */}
+            {selectedClip.effects !== undefined && (
+              <details style={{ marginTop: '16px' }}>
+                <summary className="panel-section-label" style={{ cursor: 'pointer', userSelect: 'none' }}>Effects</summary>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Brightness</span><span>{localEffects.brightness.toFixed(1)}</span>
+                    </div>
+                    <input type="range" min="0" max="2" step="0.1" value={localEffects.brightness} onChange={e => handleEffectChange('brightness', parseFloat(e.target.value))} className="prop-range" />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Contrast</span><span>{localEffects.contrast.toFixed(1)}</span>
+                    </div>
+                    <input type="range" min="0" max="2" step="0.1" value={localEffects.contrast} onChange={e => handleEffectChange('contrast', parseFloat(e.target.value))} className="prop-range" />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Saturation</span><span>{localEffects.saturation.toFixed(1)}</span>
+                    </div>
+                    <input type="range" min="0" max="2" step="0.1" value={localEffects.saturation} onChange={e => handleEffectChange('saturation', parseFloat(e.target.value))} className="prop-range" />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Blur</span><span>{localEffects.blur}px</span>
+                    </div>
+                    <input type="range" min="0" max="20" step="1" value={localEffects.blur} onChange={e => handleEffectChange('blur', parseInt(e.target.value, 10))} className="prop-range" />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Sharpen</span><span>{localEffects.sharpen.toFixed(1)}</span>
+                    </div>
+                    <input type="range" min="0" max="1" step="0.1" value={localEffects.sharpen} onChange={e => handleEffectChange('sharpen', parseFloat(e.target.value))} className="prop-range" />
+                  </div>
+                </div>
+              </details>
+            )}
           </>
         )}
       </div>

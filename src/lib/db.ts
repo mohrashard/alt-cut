@@ -10,6 +10,24 @@ export async function getDb(): Promise<Database> {
   return dbInstance;
 }
 
+export interface ClipEffects {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  blur: number;
+  sharpen: number;
+}
+
+export interface Transition {
+  id: number;
+  track_id: number;
+  clip_a_id: number;
+  clip_b_id: number;
+  type: "ink" | "wipe" | "shutter";
+  duration_frames: number;
+  created_at: string;
+}
+
 // ─── Interfaces ───────────────────────────────────────────────
 
 export interface Project {
@@ -59,6 +77,7 @@ export interface TimelineClip {
   hidden: number;                            // 0 for visible, 1 for hidden
   audio_separated?: number;
   paired_audio_clip_id?: number | null;
+  effects?: string;
   // joined from assets
   file_path?: string;
   type?: string;
@@ -158,6 +177,21 @@ export async function runMigrations(): Promise<void> {
   try {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN paired_audio_clip_id INTEGER`);
   } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN effects TEXT DEFAULT '{}'`);
+  } catch { /* column already exists */ }
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS transitions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      track_id INTEGER NOT NULL,
+      clip_a_id INTEGER NOT NULL,
+      clip_b_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      duration_frames INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
   // Markers table
   await db.execute(`
@@ -302,6 +336,11 @@ export async function updateClipTime(
 export async function setClipHidden(clipId: number, hidden: boolean): Promise<void> {
   const db = await getDb();
   await db.execute('UPDATE timeline_clips SET hidden=$1 WHERE id=$2', [hidden ? 1 : 0, clipId]);
+}
+
+export async function updateClipEffects(clipId: number, effects: ClipEffects): Promise<void> {
+  const db = await getDb();
+  await db.execute('UPDATE timeline_clips SET effects=$1 WHERE id=$2', [JSON.stringify(effects), clipId]);
 }
 
 export async function setAudioVolume(clipId: number, volume: number): Promise<void> {
@@ -514,5 +553,40 @@ export async function setAudioSeparated(
             paired_audio_clip_id = $2
       WHERE id = $3`,
     [separated ? 1 : 0, pairedAudioClipId, clipId],
+  );
+}
+
+// ─── Transitions ──────────────────────────────────────────────
+
+export async function getAllTransitions(): Promise<Transition[]> {
+  const db = await getDb();
+  return db.select<Transition[]>('SELECT * FROM transitions');
+}
+
+export async function upsertTransition(transition: Omit<Transition, 'id' | 'created_at'>): Promise<void> {
+  const db = await getDb();
+  const existing = await db.select<Transition[]>(
+    'SELECT * FROM transitions WHERE clip_a_id = $1 AND clip_b_id = $2',
+    [transition.clip_a_id, transition.clip_b_id]
+  );
+
+  if (existing.length > 0) {
+    await db.execute(
+      'UPDATE transitions SET type = $1, duration_frames = $2 WHERE id = $3',
+      [transition.type, transition.duration_frames, existing[0].id]
+    );
+  } else {
+    await db.execute(
+      'INSERT INTO transitions (track_id, clip_a_id, clip_b_id, type, duration_frames) VALUES ($1, $2, $3, $4, $5)',
+      [transition.track_id, transition.clip_a_id, transition.clip_b_id, transition.type, transition.duration_frames]
+    );
+  }
+}
+
+export async function deleteTransition(clipAId: number, clipBId: number): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    'DELETE FROM transitions WHERE clip_a_id = $1 AND clip_b_id = $2',
+    [clipAId, clipBId]
   );
 }

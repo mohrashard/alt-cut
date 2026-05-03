@@ -1,9 +1,21 @@
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, Video, Audio, Sequence, spring } from 'remotion';
+import { EffectWrapper } from './EffectWrapper';
+import { TransitionHandler } from './TransitionHandler';
+import type { ClipEffects, Transition } from '../lib/db';
+
+const DEFAULT_EFFECTS: ClipEffects = {
+  brightness: 1.0,
+  contrast: 1.0,
+  saturation: 1.0,
+  blur: 0,
+  sharpen: 0,
+};
 
 const secondsToFrame = (t: number, fps: number) => Math.floor(t * fps);
 
 interface Props {
   clips: any[];
+  transitions?: Transition[];
   fontFamily?: string;
   animationStyle?: string;
   captionX?: number;
@@ -12,6 +24,7 @@ interface Props {
 
 export const HormoziCaptions: React.FC<Props> = ({
   clips = [],
+  transitions = [],
   fontFamily = 'Arial',
   animationStyle = 'hormozi',
   captionX = 0,
@@ -28,24 +41,56 @@ export const HormoziCaptions: React.FC<Props> = ({
       {videoClips.length > 0 ? (
         <AbsoluteFill>
           {/* Video tracks */}
-          {videoClips.map((clip) => {
-            const startFrame = secondsToFrame(clip.timeline_start, fps);
-            const durationFrames = Math.max(1, secondsToFrame(clip.end_time - clip.start_time, fps));
+          {(() => {
+            const elements = [];
+            for (let i = 0; i < videoClips.length; i++) {
+              const clip = videoClips[i];
+              const prevClip = videoClips[i - 1];
+              const nextClip = videoClips[i + 1];
 
-            return (
-              <Sequence key={`vid-${clip.id}`} from={startFrame} durationInFrames={durationFrames}>
-                <AbsoluteFill>
-                  <Video
-                    src={clip.previewSrc || clip.file_path}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    startFrom={secondsToFrame(clip.start_time, fps)}
-                    muted={clip.audio_enabled === 0}
-                    volume={clip.audio_volume ?? 1.0}
-                  />
-                </AbsoluteFill>
-              </Sequence>
-            );
-          })}
+              const transIn = prevClip ? transitions?.find(t => t.clip_a_id === prevClip.id && t.clip_b_id === clip.id) : null;
+              const transOut = nextClip ? transitions?.find(t => t.clip_a_id === clip.id && t.clip_b_id === nextClip.id) : null;
+
+              let parsedEffects = DEFAULT_EFFECTS;
+              if (clip.effects) {
+                try { parsedEffects = { ...DEFAULT_EFFECTS, ...JSON.parse(clip.effects) }; } catch (e) {}
+              }
+
+              const clipDurSec = clip.end_time - clip.start_time;
+              const transInSec = transIn ? transIn.duration_frames / fps : 0;
+              const transOutSec = transOut ? transOut.duration_frames / fps : 0;
+
+              // Render the solo part of the clip
+              const soloStartSec = clip.timeline_start + transInSec;
+              const soloDurSec = clipDurSec - transInSec - transOutSec;
+              if (soloDurSec > 0) {
+                elements.push(
+                  <Sequence key={`vid-solo-${clip.id}`} from={secondsToFrame(soloStartSec, fps)} durationInFrames={Math.max(1, secondsToFrame(soloDurSec, fps))}>
+                    <EffectWrapper clipId={clip.id} effects={parsedEffects}>
+                      <Video
+                        src={clip.previewSrc || clip.file_path}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        startFrom={secondsToFrame(clip.start_time + transInSec, fps)}
+                        muted={clip.audio_enabled === 0}
+                        volume={clip.audio_volume ?? 1.0}
+                      />
+                    </EffectWrapper>
+                  </Sequence>
+                );
+              }
+
+              // Render the transition TO the next clip
+              if (transOut && nextClip) {
+                const transStartFrame = secondsToFrame(clip.timeline_start + clipDurSec - transOutSec, fps);
+                elements.push(
+                  <Sequence key={`trans-${clip.id}-${nextClip.id}`} from={transStartFrame} durationInFrames={transOut.duration_frames}>
+                    <TransitionHandler clipA={clip} clipB={nextClip} transition={transOut} durationFrames={transOut.duration_frames} />
+                  </Sequence>
+                );
+              }
+            }
+            return elements;
+          })()}
 
           {/* Audio tracks */}
           {audioClips.map((clip) => {

@@ -260,6 +260,10 @@ function App() {
           isRendering={isRendering}
           onExport={handleExport}
           onClearTimeline={handleClearTimeline}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          canUndo={canUndo}
+          canRedo={canRedo}
         />
 
         {/* Toolbar */}

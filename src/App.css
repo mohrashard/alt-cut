@@ -29,6 +29,26 @@
   --sidebar-width: 260px;
   --panel-right-width: 300px;
   --timeline-height: 300px;
+
+  /* ─── Alt-Cut design tokens ─────────────────────────── */
+  --ac-bg-base: #0e0e10;
+  --ac-bg-panel: #141416;
+  --ac-bg-elevated: #1a1a1e;
+  --ac-bg-overlay: #111113;
+  --ac-border: #1e1e22;
+  --ac-border-subtle: #252529;
+  --ac-accent: #7c5cfc;
+  --ac-accent-dim: #1e1a2e;
+  --ac-accent-text: #a08dfc;
+  --ac-text-primary: #e2e2e8;
+  --ac-text-secondary: #888;
+  --ac-text-muted: #555;
+  --ac-clip-video-bg: #1e3a5f;
+  --ac-clip-video-border: #2a5080;
+  --ac-clip-audio-bg: #0f3322;
+  --ac-clip-audio-border: #1a5035;
+  --ac-clip-caption-bg: #2a1a4e;
+  --ac-clip-caption-border: #3d2870;
 }
 
 * {
@@ -38,12 +58,18 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background-color: var(--bg-main);
-  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  background-color: var(--ac-bg-base);
+  color: var(--ac-text-primary);
   overflow: hidden;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  background-color: var(--ac-bg-base);
+  color: var(--ac-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
 }
 
 /* ─── APP SHELL ─────────────────────────────────────────── */

@@ -175,6 +175,46 @@ async fn run_render_pipeline(payload_json: String) -> Result<String, String> {
         return Err(format!("Failed to write render_props.json: {}", e));
     }
 
+    // Parse effects and transitions to lay groundwork for FFmpeg export
+    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&payload_json) {
+        if let Some(clips) = payload.get("clips").and_then(|c| c.as_array()) {
+            for clip in clips {
+                if let Some(effects_str) = clip.get("effects").and_then(|e| e.as_str()) {
+                    if let Ok(effects) = serde_json::from_str::<serde_json::Value>(effects_str) {
+                        let mut vf = Vec::new();
+                        let b = effects.get("brightness").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                        let c = effects.get("contrast").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                        let s = effects.get("saturation").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                        if (b - 1.0).abs() > 0.01 || (c - 1.0).abs() > 0.01 || (s - 1.0).abs() > 0.01 {
+                            vf.push(format!("eq=brightness={}:contrast={}:saturation={}", b, c, s));
+                        }
+                        if let Some(blur) = effects.get("blur").and_then(|v| v.as_i64()) {
+                            if blur > 0 {
+                                vf.push(format!("boxblur={}", blur));
+                            }
+                        }
+                        if let Some(sharpen) = effects.get("sharpen").and_then(|v| v.as_f64()) {
+                            if sharpen > 0.0 {
+                                vf.push(format!("unsharp=5:5:{}", sharpen));
+                            }
+                        }
+                        if !vf.is_empty() {
+                            println!("FFmpeg filter for clip {}: -vf \"{}\"", clip.get("id").and_then(|i| i.as_i64()).unwrap_or(0), vf.join(","));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(transitions) = payload.get("transitions").and_then(|t| t.as_array()) {
+            for t in transitions {
+                if let Some(t_type) = t.get("type").and_then(|ty| ty.as_str()) {
+                    // TODO: FFmpeg luma matte for transition type
+                    println!("// TODO: FFmpeg luma matte for transition type {}", t_type);
+                }
+            }
+        }
+    }
+
     println!("🎬 Starting Remotion Export...");
 
     let mut remotion = Command::new("cmd");
