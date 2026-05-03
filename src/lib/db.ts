@@ -487,6 +487,11 @@ export async function getMarkers(projectId: number): Promise<Marker[]> {
   );
 }
 
+export async function updateMarkerTime(markerId: number, timeSeconds: number): Promise<void> {
+  const db = await getDb();
+  await db.execute('UPDATE markers SET time_seconds = $1 WHERE id = $2', [timeSeconds, markerId]);
+}
+
 export async function deleteMarker(markerId: number): Promise<void> {
   const db = await getDb();
   await db.execute('DELETE FROM markers WHERE id = $1', [markerId]);

@@ -60,12 +60,24 @@ export function Timeline({
 
   const [dragVolume, setDragVolume] = useState<{ clipIds: number[]; volume: number } | null>(null);
 
+  // ── Marker drag — ref-only (no state) for zero-re-render smoothness ─────────
+  const markerDragRef = useRef<{
+    markerId: number;
+    startMouseX: number;
+    origTime: number;
+    elRef: HTMLDivElement;
+    ppsRef: number;
+    totalDur: number;
+  } | null>(null);
+  // A map from marker id -> DOM element for direct style.left writes
+  const markerElemMap = useRef<Map<number, HTMLDivElement>>(new Map());
+
   // ── Clipboard ─────────────────────────────────────────────────
   const [hasPasteContent, setHasPasteContent] = useState(clipboardClips.length > 0);
 
   const tracksRef = useRef<HTMLDivElement>(null);
   const mouseXRef = useRef(0);
-  const isAnyDragging = trimState !== null || dragClip !== null;
+  const isAnyDragging = trimState !== null || dragClip !== null || markerDragRef.current !== null;
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => { mouseXRef.current = e.clientX; };
@@ -79,6 +91,7 @@ export function Timeline({
       setSnapPoint(null);
       setDragClip(null);
       setTrimState(null);
+      markerDragRef.current = null;
     };
     document.addEventListener('mouseup', clearSnap);
     window.addEventListener('blur', clearDrags);
@@ -324,6 +337,79 @@ export function Timeline({
       };
     }
   }, [dragClip, onClipDragging, onClipDragEnd]);
+
+  // ── Marker Dragging — ref-based, zero re-renders (same pattern as playhead) ──
+  const onMarkerMouseDown = (e: React.MouseEvent, marker: typeof markers[0]) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const el = markerElemMap.current.get(marker.id);
+    if (!el) return;
+
+    markerDragRef.current = {
+      markerId: marker.id,
+      startMouseX: e.clientX,
+      origTime: marker.time_seconds,
+      elRef: el,
+      ppsRef: pps,
+      totalDur,
+    };
+    el.style.cursor = 'grabbing';
+    const flag = el.querySelector('.marker-flag') as HTMLElement | null;
+    if (flag) flag.style.cursor = 'grabbing';
+
+    // Track whether the user actually moved the marker so we can suppress
+    // the browser click event that fires after mouseup (which would otherwise
+    // call onPlayheadChange and jump the playhead).
+    let hasMoved = false;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const drag = markerDragRef.current;
+      if (!drag) return;
+      const deltaPx = ev.clientX - drag.startMouseX;
+      // Only count as a real drag if the mouse moved more than 2 px
+      if (!hasMoved && Math.abs(deltaPx) > 2) hasMoved = true;
+      let newTime = drag.origTime + deltaPx / drag.ppsRef;
+      if (newTime < 0) newTime = 0;
+      if (newTime > drag.totalDur) newTime = drag.totalDur;
+      // Direct DOM write — no React setState, no re-render
+      drag.elRef.style.left = `${newTime * drag.ppsRef}px`;
+    };
+
+    const onMouseUp = async () => {
+      const drag = markerDragRef.current;
+      if (!drag) return;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+
+      // Read final position from DOM
+      const finalPx = parseFloat(drag.elRef.style.left) || 0;
+      const finalTime = finalPx / drag.ppsRef;
+
+      drag.elRef.style.cursor = '';
+      const flagEl = drag.elRef.querySelector('.marker-flag') as HTMLElement | null;
+      if (flagEl) flagEl.style.cursor = '';
+
+      markerDragRef.current = null;
+
+      if (hasMoved) {
+        // Swallow the click event the browser fires after mouseup so the
+        // onClick → onPlayheadChange handler never runs for a drag operation.
+        document.addEventListener('click', (ev) => ev.stopPropagation(), {
+          capture: true,
+          once: true,
+        });
+
+        // Persist to DB and refresh
+        const db = await import('../../lib/db');
+        await db.updateMarkerTime(drag.markerId, finalTime);
+        onMarkersChange();
+      }
+      // If hasMoved is false it was a plain click — let the React onClick fire normally
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
 
   // ── Split ─────────────────────────────────────────────────────
   const handleSplit = async () => {
@@ -855,15 +941,26 @@ export function Timeline({
             />
 
             {markers.map(marker => (
-              <div key={`ml-${marker.id}`} className="marker-line"
-                style={{ left: marker.time_seconds * pps, borderColor: marker.color }}>
-                <div className="marker-flag" style={{ background: marker.color }}
+              <div
+                key={`ml-${marker.id}`}
+                className="marker-line"
+                ref={el => {
+                  if (el) markerElemMap.current.set(marker.id, el);
+                  else markerElemMap.current.delete(marker.id);
+                }}
+                style={{ left: marker.time_seconds * pps, borderColor: marker.color }}
+              >
+                <div
+                  className="marker-flag"
+                  style={{ background: marker.color, cursor: 'grab' }}
                   title={marker.label || fmt(marker.time_seconds)}
+                  onMouseDown={e => onMarkerMouseDown(e, marker)}
                   onClick={() => onPlayheadChange(marker.time_seconds)}
                   onContextMenu={e => {
                     e.preventDefault(); e.stopPropagation();
                     setMarkerCtxMenu({ x: e.clientX, y: e.clientY, markerId: marker.id });
-                  }} />
+                  }}
+                />
               </div>
             ))}
 
