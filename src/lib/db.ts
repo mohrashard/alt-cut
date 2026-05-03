@@ -200,7 +200,7 @@ export async function runMigrations(): Promise<void> {
       project_id INTEGER NOT NULL,
       time_seconds REAL NOT NULL,
       label TEXT DEFAULT '',
-      color TEXT DEFAULT '#ffcc00',
+      color TEXT DEFAULT '#7c5cfc',
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     )
   `);
@@ -506,7 +506,7 @@ export async function addMarker(
   projectId: number,
   timeSeconds: number,
   label = '',
-  color = '#ffcc00'
+  color = '#7c5cfc'
 ): Promise<Marker> {
   const db = await getDb();
   const { lastInsertId } = await db.execute(
