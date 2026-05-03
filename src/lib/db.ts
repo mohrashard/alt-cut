@@ -497,6 +497,11 @@ export async function deleteMarker(markerId: number): Promise<void> {
   await db.execute('DELETE FROM markers WHERE id = $1', [markerId]);
 }
 
+export async function clearMarkers(projectId: number): Promise<void> {
+  const db = await getDb();
+  await db.execute('DELETE FROM markers WHERE project_id = $1', [projectId]);
+}
+
 export async function setAudioSeparated(
   clipId: number,
   separated: boolean,

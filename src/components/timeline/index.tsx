@@ -887,6 +887,12 @@ export function Timeline({
         onDeleteRight={handleDeleteRight}
         onDelete={handleDelete}
         onAddMarker={handleAddMarker}
+        onClearMarkers={async () => {
+          if (!projectId) return;
+          const db = await import('../../lib/db');
+          await db.clearMarkers(projectId);
+          onMarkersChange();
+        }}
         onToggleMagnet={() => setMagnetOn(m => !m)}
         onToggleRippleEditing={() => setRippleOn(r => !r)}
         onDuplicate={handleDuplicate}

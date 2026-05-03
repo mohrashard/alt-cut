@@ -27,6 +27,7 @@ interface TimelineToolbarProps {
   onDeleteRight: () => void;
   onDelete: () => void;
   onAddMarker: () => void;
+  onClearMarkers: () => void;
   onToggleMagnet: () => void;
   onToggleRippleEditing?: () => void;
   onDuplicate?: () => void;
@@ -43,7 +44,7 @@ export function TimelineToolbar({
   pps, playheadSeconds, videoDuration, timecodeDomRef,
   onUndo, onRedo, onSplit, onDeleteLeft, onDeleteRight, onDelete,
   onAddMarker, onToggleMagnet, onToggleRippleEditing, onDuplicate,
-  onToggleAudio, onZoomFit, onZoomOut, onZoomIn, onZoomSlider,
+  onToggleAudio, onZoomFit, onZoomOut, onZoomIn, onZoomSlider, onClearMarkers,
 }: TimelineToolbarProps) {
   const isRippleOn = !!rippleEditingOn;
   const hasSelection = selectedClipIds.length > 0;
@@ -336,6 +337,11 @@ export function TimelineToolbar({
         <div className="tl-group">
           <button className="tl-b accent-marker" title="Add marker (M)" onClick={onAddMarker}>
             <MarkerIcon />
+          </button>
+          <button className="tl-b" title="Clear all markers" onClick={onClearMarkers} style={{ color: '#fc8181' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
           </button>
         </div>
 
