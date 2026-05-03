@@ -18,6 +18,24 @@ export interface ClipEffects {
   sharpen: number;
 }
 
+export interface CaptionStyle {
+  preset: string;          // e.g. 'hormozi', 'karaoke', 'custom'
+  fontFamily: string;
+  fontSize: number;
+  color: string;           // active/highlight word color
+  strokeColor: string;
+  strokeWidth: number;
+  glowColor: string;
+  glowSize: number;        // 0 = off
+  bgColor: string;         // 'transparent' or a CSS color
+  bgOpacity: number;       // 0–1
+  bold: boolean;
+  italic: boolean;
+  uppercase: boolean;
+  highlightColor: string;  // color applied to the currently-spoken word
+  animation: 'pop' | 'fade' | 'none';
+}
+
 export interface Transition {
   id: number;
   track_id: number;
@@ -78,6 +96,7 @@ export interface TimelineClip {
   audio_separated?: number;
   paired_audio_clip_id?: number | null;
   effects?: string;
+  caption_style?: string | null;     // JSON-serialised CaptionStyle; null = use preset default
   // joined from assets
   file_path?: string;
   type?: string;
@@ -179,6 +198,9 @@ export async function runMigrations(): Promise<void> {
   } catch { /* column already exists */ }
   try {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN effects TEXT DEFAULT '{}'`);
+  } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN caption_style TEXT DEFAULT '{}'`);
   } catch { /* column already exists */ }
 
   await db.execute(`
@@ -341,6 +363,11 @@ export async function setClipHidden(clipId: number, hidden: boolean): Promise<vo
 export async function updateClipEffects(clipId: number, effects: ClipEffects): Promise<void> {
   const db = await getDb();
   await db.execute('UPDATE timeline_clips SET effects=$1 WHERE id=$2', [JSON.stringify(effects), clipId]);
+}
+
+export async function updateCaptionStyle(clipId: number, style: CaptionStyle): Promise<void> {
+  const db = await getDb();
+  await db.execute('UPDATE timeline_clips SET caption_style=$1 WHERE id=$2', [JSON.stringify(style), clipId]);
 }
 
 export async function setAudioVolume(clipId: number, volume: number): Promise<void> {

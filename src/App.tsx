@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DndContext, DragEndEvent, pointerWithin } from '@dnd-kit/core';
-import type { TimelineClip, Marker } from './lib/db';
+import type { TimelineClip, Marker, ClipEffects } from './lib/db';
 
 import { TopNav } from "./components/TopNav";
 import { IconRail } from "./components/IconRail";
@@ -9,6 +9,8 @@ import { MediaSidebar } from "./components/MediaSidebar";
 import { PreviewWindow } from "./components/PreviewWindow";
 import { PropertiesPanel, AppFeatures } from "./components/PropertiesPanel";
 import { Timeline } from "./components/Timeline";
+import { TransitionsSidebar } from "./components/TransitionsSidebar";
+import { EffectsSidebar } from "./components/EffectsSidebar";
 import "./App.css";
 
 // ─── App ─────────────────────────────────────────────────────
@@ -36,6 +38,16 @@ function App() {
 
   const selectedClips = timelineClips.filter(c => selectedClipIds.includes(c.id));
   const selectedClip = selectedClips.length === 1 ? selectedClips[0] : null;
+
+  const currentEffectsRaw = selectedClip?.effects;
+  const currentEffects: ClipEffects = useMemo(() => {
+    const defaultEffects = { brightness: 1.0, contrast: 1.0, saturation: 1.0, blur: 0, sharpen: 0 };
+    try {
+      return { ...defaultEffects, ...JSON.parse(currentEffectsRaw || '{}') };
+    } catch {
+      return defaultEffects;
+    }
+  }, [currentEffectsRaw]);
 
   // Push current clips to the history stack before a mutation
   const pushHistory = useCallback((clips: TimelineClip[]) => {
@@ -108,6 +120,43 @@ function App() {
 
   const handleMediaAdded = (_filePath: string) => { /* no-op */ };
   const handleMediaSelected = (_path: string) => { /* no-op */ };
+
+  const handleApplyTransition = useCallback(async (transitionType: string) => {
+    if (!selectedClip) return;
+    const db = await import('./lib/db');
+    
+    const sameTrackClips = timelineClips.filter(
+      c => c.track_type === selectedClip.track_type && c.track_lane === selectedClip.track_lane
+    ).sort((a, b) => a.timeline_start - b.timeline_start);
+    
+    const currentIndex = sameTrackClips.findIndex(c => c.id === selectedClip.id);
+    if (currentIndex <= 0) {
+      alert("Transitions require a preceding clip on the same track.");
+      return;
+    }
+    const prevClip = sameTrackClips[currentIndex - 1];
+
+    if (transitionType === 'none') {
+      await db.deleteTransition(prevClip.id, selectedClip.id);
+    } else {
+      await db.upsertTransition({
+        track_id: selectedClip.track_lane,
+        clip_a_id: prevClip.id,
+        clip_b_id: selectedClip.id,
+        type: transitionType as any,
+        duration_frames: 15,
+      });
+    }
+  }, [selectedClip, timelineClips]);
+
+  const handleApplyEffects = useCallback(async (effects: ClipEffects) => {
+    if (!selectedClip) return;
+    const db = await import('./lib/db');
+    await db.updateClipEffects(selectedClip.id, effects);
+    if (currentProject) {
+      await loadTimeline(currentProject.id);
+    }
+  }, [selectedClip, currentProject, loadTimeline]);
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -204,13 +253,26 @@ function App() {
 
         {/* Left Sidebar */}
         <div className="layout-left">
-          <MediaSidebar
-            projectId={currentProject?.id}
-            onMediaSelected={handleMediaSelected}
-            onMediaAdded={handleMediaAdded}
-            highlightAssetId={highlightAssetId}
-            onHighlightClear={() => setHighlightAssetId(null)}
-          />
+          {activeToolTab === 'transitions' ? (
+            <TransitionsSidebar
+              selectedClipId={selectedClip?.id ? String(selectedClip.id) : null}
+              onApply={handleApplyTransition}
+            />
+          ) : activeToolTab === 'effects' ? (
+            <EffectsSidebar
+              selectedClipId={selectedClip?.id ? String(selectedClip.id) : null}
+              currentEffects={currentEffects}
+              onApply={handleApplyEffects}
+            />
+          ) : (
+            <MediaSidebar
+              projectId={currentProject?.id}
+              onMediaSelected={handleMediaSelected}
+              onMediaAdded={handleMediaAdded}
+              highlightAssetId={highlightAssetId}
+              onHighlightClear={() => setHighlightAssetId(null)}
+            />
+          )}
         </div>
 
         {/* Center Workspace */}

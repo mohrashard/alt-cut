@@ -1,7 +1,8 @@
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, Video, Audio, Sequence, spring } from 'remotion';
 import { EffectWrapper } from './EffectWrapper';
 import { TransitionHandler } from './TransitionHandler';
-import type { ClipEffects, Transition } from '../lib/db';
+import type { ClipEffects, CaptionStyle, Transition } from '../lib/db';
+import { parseCaptionStyle } from '../lib/captionPresets';
 
 const DEFAULT_EFFECTS: ClipEffects = {
   brightness: 1.0,
@@ -136,7 +137,6 @@ export const HormoziCaptions: React.FC<Props> = ({
                 <TextClip
                   clip={clip}
                   chunkData={chunkData}
-                  fontFamily={fontFamily}
                   animationStyle={animationStyle}
                   captionX={captionX}
                   captionY={captionY}
@@ -161,13 +161,17 @@ export const HormoziCaptions: React.FC<Props> = ({
 const TextClip: React.FC<{
   clip: any;
   chunkData: any;
-  fontFamily: string;
   animationStyle: string;
   captionX: number;
   captionY: number;
   fps: number;
-}> = ({ clip, chunkData, fontFamily, animationStyle, captionX, captionY, fps }) => {
+}> = ({ clip, chunkData, animationStyle, captionX, captionY, fps }) => {
   const frame = useCurrentFrame();
+
+  // ── Resolve captionStyle from the clip's DB field, fall back to hormozi preset ──
+  const captionStyle: CaptionStyle = parseCaptionStyle(
+    typeof clip.caption_style === 'string' ? clip.caption_style : null
+  );
 
   // Convert sequence-local frame -> absolute video seconds
   // This absolute seconds matches the original audio timing if it was un-shifted.
@@ -184,6 +188,36 @@ const TextClip: React.FC<{
   // Because the "asset" for a TextClip is the chunk itself, we must add chunkData.start.
   const chunkStart = chunkData.start || 0;
   const assetSeconds = chunkStart + clip.start_time + sequenceLocalSeconds;
+
+  // ── Build derived style values from captionStyle ───────────────────────────
+  const resolvedFontFamily =
+    captionStyle.fontFamily === 'Proxima Nova'
+      ? '"Proxima Nova", "Arial", sans-serif'
+      : `${captionStyle.fontFamily}, sans-serif`;
+
+  // Stroke
+  const webkitTextStroke =
+    captionStyle.strokeWidth > 0
+      ? `${captionStyle.strokeWidth}px ${captionStyle.strokeColor}`
+      : 'none';
+
+  // Glow text-shadow (only when glowSize > 0)
+  // The outer wrapper also keeps the classic Hormozi thick-black-shadow so we
+  // compose both together.  The glow is prepended so it appears on top.
+  const buildTextShadow = () => {
+    const classicShadow = [
+      `4px 4px 0 ${captionStyle.strokeColor}`,
+      `-4px -4px 0 ${captionStyle.strokeColor}`,
+      `4px -4px 0 ${captionStyle.strokeColor}`,
+      `-4px 4px 0 ${captionStyle.strokeColor}`,
+      `0px 6px 0px ${captionStyle.strokeColor}`,
+      `0px 12px 20px rgba(0,0,0,0.8)`,
+    ].join(', ');
+    if (captionStyle.glowSize > 0) {
+      return `0 0 ${captionStyle.glowSize}px ${captionStyle.glowColor}, ${classicShadow}`;
+    }
+    return classicShadow;
+  };
 
   return (
     <AbsoluteFill
@@ -207,24 +241,14 @@ const TextClip: React.FC<{
           justifyContent: 'center',
           gap: '12px',
           width: '90%',
-          fontFamily:
-            fontFamily === 'Proxima Nova'
-              ? '"Proxima Nova", "Arial", sans-serif'
-              : `${fontFamily}, sans-serif`,
-          fontSize: '76px',
-          fontWeight: '900',
-          textTransform: 'uppercase',
+          fontFamily: resolvedFontFamily,
+          fontSize: `${captionStyle.fontSize}px`,
+          fontWeight: captionStyle.bold ? 700 : 400,
+          fontStyle: captionStyle.italic ? 'italic' : 'normal',
+          textTransform: captionStyle.uppercase ? 'uppercase' : 'none',
           textAlign: 'center',
-          // Classic thick black outline and shadow
-          textShadow: `
-            4px 4px 0 #000, 
-            -4px -4px 0 #000, 
-            4px -4px 0 #000, 
-            -4px 4px 0 #000,
-            0px 6px 0px #000,
-            0px 12px 20px rgba(0,0,0,0.8)
-          `,
-          WebkitTextStroke: '2px black',
+          textShadow: buildTextShadow(),
+          WebkitTextStroke: webkitTextStroke,
           lineHeight: 1.15,
         }}
       >
@@ -241,7 +265,7 @@ const TextClip: React.FC<{
 
             if (isActive) {
               if (animationStyle === 'hormozi') {
-                // Spring animation for aggressive pop
+                // Spring animation for aggressive pop — timing unchanged
                 const pop = spring({
                   fps,
                   frame: wordActiveFrames,
@@ -254,18 +278,33 @@ const TextClip: React.FC<{
               }
             }
 
-            const activeColor = animationStyle === 'karaoke' ? '#39ff14' : '#FFDE59'; // Bright Hormozi Yellow
+            // Active (highlighted) word colour comes from captionStyle
+            const activeColor = captionStyle.highlightColor;
+            // Inactive word colour comes from captionStyle.color
+            const inactiveColor = captionStyle.color;
+
+            // Per-word glow on the active word (uses captionStyle.glowSize / glowColor)
+            const wordFilter =
+              isActive && captionStyle.glowSize > 0
+                ? `drop-shadow(0 0 ${captionStyle.glowSize}px ${captionStyle.glowColor})`
+                : 'none';
 
             return (
               <span
                 key={idx}
                 style={{
-                  color:     isActive ? activeColor : 'white',
+                  color:      isActive ? activeColor : inactiveColor,
+                  // Apply a background chip to the active word only when the preset
+                  // explicitly opts in via bgOpacity > 0 (e.g. 'neon' preset).
+                  // For hormozi / karaoke the background stays transparent.
+                  background: isActive && captionStyle.bgOpacity > 0
+                    ? captionStyle.highlightColor
+                    : 'transparent',
                   transform: `scale(${scale}) rotate(${rotate}deg)`,
                   display:   'inline-block',
-                  // Only apply transitions for karaoke; hormozi is driven frame-by-frame by the spring
+                  // Only apply CSS transitions for karaoke; hormozi is driven frame-by-frame
                   transition: animationStyle === 'karaoke' ? 'transform 0.08s ease-out, color 0.05s ease' : 'none',
-                  filter:    isActive ? `drop-shadow(0 0 16px ${activeColor})` : 'none',
+                  filter:    wordFilter,
                   zIndex:    isActive ? 10 : 1,
                   position:  'relative',
                 }}
@@ -275,7 +314,7 @@ const TextClip: React.FC<{
             );
           })
         ) : (
-          <span style={{ color: 'white' }}>{chunkData.text}</span>
+          <span style={{ color: captionStyle.color }}>{chunkData.text}</span>
         )}
       </div>
     </AbsoluteFill>

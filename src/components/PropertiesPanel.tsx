@@ -1,15 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { TimelineClip, ClipEffects } from '../lib/db';
+import type { TimelineClip, CaptionStyle } from '../lib/db';
 import * as db from '../lib/db';
-
-const DEFAULT_EFFECTS: ClipEffects = {
-  brightness: 1.0,
-  contrast: 1.0,
-  saturation: 1.0,
-  blur: 0,
-  sharpen: 0,
-};
+import { parseCaptionStyle } from '../lib/captionPresets';
+import { CaptionStyleEditor } from './CaptionStyleEditor';
 
 export interface AppFeatures {
   fontFamily: string;
@@ -61,30 +55,26 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
   // Reset log when clip changes
   useEffect(() => { setLog(''); }, [selectedClip?.id]);
 
-  const updateSelect = (key: keyof AppFeatures, value: any) =>
-    setFeatures(prev => ({ ...prev, [key]: value }));
 
-  // ── Effects State ─────────────────────────────────────────
-  const clipEffectsRaw = selectedClip?.effects;
-  const defaultParsedEffects = useMemo(() => {
-    try {
-      return { ...DEFAULT_EFFECTS, ...JSON.parse(clipEffectsRaw || '{}') };
-    } catch {
-      return DEFAULT_EFFECTS;
-    }
-  }, [clipEffectsRaw]);
 
-  const [localEffects, setLocalEffects] = useState<ClipEffects>(defaultParsedEffects);
+  // ── Caption Style State ────────────────────────────────────
+  const clipCaptionStyleRaw = selectedClip?.caption_style;
+  const parsedCaptionStyle = useMemo(
+    () => parseCaptionStyle(clipCaptionStyleRaw ?? null),
+    [clipCaptionStyleRaw]
+  );
 
+  const [localCaptionStyle, setLocalCaptionStyle] = useState<CaptionStyle>(parsedCaptionStyle);
+
+  // Sync when clip changes
   useEffect(() => {
-    setLocalEffects(defaultParsedEffects);
-  }, [defaultParsedEffects]);
+    setLocalCaptionStyle(parsedCaptionStyle);
+  }, [parsedCaptionStyle]);
 
-  const handleEffectChange = async (key: keyof ClipEffects, value: number) => {
+  const handleCaptionStyleChange = async (newStyle: CaptionStyle) => {
     if (!selectedClip) return;
-    const newEffects = { ...localEffects, [key]: value };
-    setLocalEffects(newEffects);
-    await db.updateClipEffects(selectedClip.id, newEffects);
+    setLocalCaptionStyle(newStyle);
+    await db.updateCaptionStyle(selectedClip.id, newStyle);
     onTimelineChange();
   };
 
@@ -219,7 +209,7 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
   return (
     <div className="prop-inspector">
       {!selectedClip ? (
-        <div className="prop-empty">Select a clip to edit</div>
+        <div className="prop-empty">Select a clip to inspect</div>
       ) : (
         <>
           {/* ── Header ────────────────────────────────────── */}
@@ -264,125 +254,17 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
               </div>
             </div>
 
-            {/* ── Effects ─────────────────────────────────── */}
-            <div className="prop-section">
-              <div className="prop-section-header">
-                Effects
-                {/* Reset button could go here as an action link if needed */}
+            {/* ── Caption Style Editor ─────── */}
+            {(selectedClip.track_type === 'text' || selectedClip.ai_metadata?.['captions']?.status === 'completed' || !!selectedClip.ai_metadata?.['captions']?.json_data) && (
+              <div className="prop-section">
+                <div className="prop-section-header">Caption Style</div>
+                <CaptionStyleEditor
+                  clipId={String(selectedClip.id)}
+                  currentStyle={localCaptionStyle}
+                  onChange={handleCaptionStyleChange}
+                />
               </div>
-
-              <div className="prop-slider-row">
-                <div className="prop-slider-label">Brightness</div>
-                <div className="prop-slider-container">
-                  <input
-                    type="range"
-                    min="0"
-                    max="2"
-                    step="0.1"
-                    value={localEffects.brightness}
-                    onChange={e => handleEffectChange('brightness', parseFloat(e.target.value))}
-                    className="prop-range"
-                  />
-                </div>
-                <div className="prop-slider-value">{localEffects.brightness.toFixed(1)}</div>
-              </div>
-
-              <div className="prop-slider-row">
-                <div className="prop-slider-label">Contrast</div>
-                <div className="prop-slider-container">
-                  <input
-                    type="range"
-                    min="0"
-                    max="2"
-                    step="0.1"
-                    value={localEffects.contrast}
-                    onChange={e => handleEffectChange('contrast', parseFloat(e.target.value))}
-                    className="prop-range"
-                  />
-                </div>
-                <div className="prop-slider-value">{localEffects.contrast.toFixed(1)}</div>
-              </div>
-
-              <div className="prop-slider-row">
-                <div className="prop-slider-label">Saturation</div>
-                <div className="prop-slider-container">
-                  <input
-                    type="range"
-                    min="0"
-                    max="2"
-                    step="0.1"
-                    value={localEffects.saturation}
-                    onChange={e => handleEffectChange('saturation', parseFloat(e.target.value))}
-                    className="prop-range"
-                  />
-                </div>
-                <div className="prop-slider-value">{localEffects.saturation.toFixed(1)}</div>
-              </div>
-
-              <div className="prop-slider-row">
-                <div className="prop-slider-label">Blur</div>
-                <div className="prop-slider-container">
-                  <input
-                    type="range"
-                    min="0"
-                    max="20"
-                    step="1"
-                    value={localEffects.blur}
-                    onChange={e => handleEffectChange('blur', parseInt(e.target.value, 10))}
-                    className="prop-range"
-                  />
-                </div>
-                <div className="prop-slider-value">{localEffects.blur}px</div>
-              </div>
-
-              <div className="prop-slider-row">
-                <div className="prop-slider-label">Sharpen</div>
-                <div className="prop-slider-container">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={localEffects.sharpen}
-                    onChange={e => handleEffectChange('sharpen', parseFloat(e.target.value))}
-                    className="prop-range"
-                  />
-                </div>
-                <div className="prop-slider-value">{localEffects.sharpen.toFixed(1)}</div>
-              </div>
-            </div>
-
-            {/* ── Transitions ─────────────────────────────── */}
-            <div className="prop-section">
-              <div className="prop-section-header">Transitions</div>
-              <div className="prop-chip-row">
-                {['None', 'Ink', 'Wipe', 'Shutter'].map(type => (
-                  <button
-                    key={type}
-                    className={`prop-chip ${type === 'None' ? 'prop-chip--active' : ''}`}
-                    onClick={() => {}} // Not wired yet per instructions to keep logic
-                  >
-                    {type}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* ── Typography ──────────────────────────────── */}
-            <div className="prop-section">
-              <div className="prop-section-header">Typography & Style</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <select className="prop-select" style={{ width: '100%' }} value={features.fontFamily} onChange={e => updateSelect('fontFamily', e.target.value)}>
-                  <option value="Arial">Arial</option>
-                  <option value="Impact">Impact</option>
-                  <option value="Proxima Nova">Proxima Nova</option>
-                </select>
-                <select className="prop-select" style={{ width: '100%' }} value={features.animationStyle} onChange={e => updateSelect('animationStyle', e.target.value)}>
-                  <option value="hormozi">Hormozi Pop (yellow)</option>
-                  <option value="karaoke">Karaoke Flow (green)</option>
-                </select>
-              </div>
-            </div>
+            )}
 
             {/* ── AI Tools ────────────────────────────────── */}
             <div className="prop-section">
