@@ -356,6 +356,70 @@ body {
   min-height: 0;
 }
 
+/* ─── ICON RAIL ──────────────────────────────────────────── */
+.icon-rail {
+  width: 52px;
+  flex-shrink: 0;
+  background: var(--ac-bg-panel);
+  border-right: 1px solid var(--ac-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 0;
+  z-index: 10;
+  overflow: hidden;
+}
+
+.icon-rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: 0 8px;
+}
+
+.icon-rail-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--ac-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+  font-family: inherit;
+  position: relative;
+}
+
+.icon-rail-btn:hover {
+  background: var(--ac-bg-elevated);
+  color: var(--ac-text-secondary);
+}
+
+.icon-rail-btn--active {
+  background: var(--ac-accent-dim);
+  color: var(--ac-accent);
+}
+
+.icon-rail-btn--active:hover {
+  background: var(--ac-accent-dim);
+  color: var(--ac-accent-text);
+}
+
+.icon-rail-sep {
+  width: 28px;
+  height: 1px;
+  background: var(--ac-border);
+  margin: 6px auto;
+  flex-shrink: 0;
+}
+
 /* ─── LEFT SIDEBAR ───────────────────────────────────────── */
 .sidebar {
   width: var(--sidebar-width);

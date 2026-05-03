@@ -4,6 +4,7 @@ import { DndContext, DragEndEvent, pointerWithin } from '@dnd-kit/core';
 import type { TimelineClip, Marker } from './lib/db';
 
 import { TopNav } from "./components/TopNav";
+import { IconRail } from "./components/IconRail";
 import { MediaSidebar } from "./components/MediaSidebar";
 import { PreviewWindow } from "./components/PreviewWindow";
 import { PropertiesPanel, AppFeatures } from "./components/PropertiesPanel";
@@ -283,6 +284,12 @@ function App() {
 
         {/* Editor Body */}
         <div className="editor-body">
+
+          {/* Icon Rail */}
+          <IconRail
+            activeTab={activeToolTab}
+            onTabChange={setActiveToolTab}
+          />
 
           {/* Left Sidebar */}
           <MediaSidebar
