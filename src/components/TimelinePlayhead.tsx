@@ -40,6 +40,7 @@ export function TimelinePlayhead({
 }: TimelinePlayheadProps) {
   // All mutable values live in refs — zero stale-closure risk in DOM callbacks
   const isDragging = useRef(false);
+  const dragOffsetRef = useRef(0);
   const ppsRef = useRef(pps);
   const totalDurRef = useRef(totalDur);
   const snapTargetsRef = useRef(snapTargets);
@@ -60,15 +61,12 @@ export function TimelinePlayhead({
       playheadRef.current.style.left = `${initialLeftPx}px`;
     }
 
-    // IMPROVEMENT #2: Horizontal Scrollbar Height Correction
     // Subtracts the scrollbar height so the playhead line doesn't
     // draw over or intercept clicks on the bottom scrollbar.
     const updateHeight = () => {
       if (tracksScrollRef.current && playheadRef.current) {
         const el = tracksScrollRef.current;
-        // A horizontal scrollbar exists when content is wider than the container
         const hasScrollbar = el.scrollWidth > el.clientWidth;
-        // Standard scrollbar is ~14px tall; subtract it so the line ends cleanly
         const totalHeight = el.clientHeight - (hasScrollbar ? 14 : 0);
         playheadRef.current.style.height = `${totalHeight}px`;
       }
@@ -105,15 +103,20 @@ export function TimelinePlayhead({
   // ── Drag handlers (attached to document, only when dragging) ──
   const onMouseMove = (e: MouseEvent) => {
     if (!isDragging.current || !tracksScrollRef.current || !playheadRef.current) return;
+
     const rect = tracksScrollRef.current.getBoundingClientRect();
-    const rawPx = e.clientX - rect.left + tracksScrollRef.current.scrollLeft;
+    // dragOffsetRef is the pixel distance from the left edge of the playhead line
+    // to where the user clicked inside the drag handle. This keeps the line from
+    // jumping to the raw cursor position on the first move.
+    const rawPx =
+      e.clientX - rect.left + tracksScrollRef.current.scrollLeft - dragOffsetRef.current;
     const clamped = Math.max(0, Math.min(rawPx, totalDurRef.current * ppsRef.current));
 
-    // Snap to clip/marker targets first
-    const snappedTargetPx = snapPx(clamped);
+    // Snap to clip/marker targets
+    const snappedPx = snapPx(clamped);
 
-    // Then snap to the nearest frame boundary (Rule #3: Frame Accuracy)
-    const sec = snappedTargetPx / ppsRef.current;
+    // Snap to the nearest frame boundary for frame accuracy
+    const sec = snappedPx / ppsRef.current;
     const frame = Math.floor(sec * fpsRef.current);
     const frameSec = frame / fpsRef.current;
 
@@ -123,31 +126,76 @@ export function TimelinePlayhead({
   const onMouseUp = (_e: MouseEvent) => {
     if (!isDragging.current) return;
     isDragging.current = false;
-    playheadRef.current?.removeAttribute('data-playhead-dragging');
-    headRef.current?.classList.remove('is-snapping');
+
+    // Clean up listeners immediately so they don't fire again
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
+
+    headRef.current?.classList.remove('is-snapping');
     onSnapGuide?.(null);
 
-    if (!tracksScrollRef.current || !playheadRef.current) return;
+    if (!tracksScrollRef.current || !playheadRef.current) {
+      playheadRef.current?.removeAttribute('data-playhead-dragging');
+      return;
+    }
 
-    const curPx = parseFloat(playheadRef.current.style.left);
-    onSeek(curPx / ppsRef.current);
+    // Read the final position the drag settled on
+    const finalPx = parseFloat(playheadRef.current.style.left ?? '0');
+    const seekSec = finalPx / ppsRef.current;
+
+    // FIX for snap-back (Bug #3):
+    // We call onSeek first, then immediately write the pixel position back.
+    // data-playhead-dragging stays set across TWO animation frames — enough
+    // time for the player to accept the seek and for the RAF loop in
+    // PreviewWindow to read the updated player time instead of the stale frame.
+    // Removing the attribute only after both frames prevents the RAf loop from
+    // overwriting style.left with the old position before the seek settles.
+    onSeek(seekSec);
+
+    // Immediately re-assert position so the RAF loop can't clobber it
+    playheadRef.current.style.left = `${finalPx}px`;
+
+    // Wait two frames: first frame = seek accepted by player,
+    // second frame = RAF loop reads updated player time
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        playheadRef.current?.removeAttribute('data-playhead-dragging');
+      });
+    });
   };
 
   // ── Only start dragging when user clicks the drag handle ──────
   const onHeadMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
+
+    if (!tracksScrollRef.current || !playheadRef.current) return;
+
+    // FIX for cursor-offset bug (Bug #1):
+    // The offset must be calculated from where style.left places the line,
+    // NOT from the visual center of the line (which may be shifted by
+    // transform: translateX(-50%) in CSS). We use the head button's
+    // bounding rect to find where the user actually clicked within the line,
+    // expressed in the same coordinate space as style.left (scroll-adjusted).
+    const rect = tracksScrollRef.current.getBoundingClientRect();
+    const cursorPxInTimeline = e.clientX - rect.left + tracksScrollRef.current.scrollLeft;
+    const lineLeftPx = parseFloat(playheadRef.current.style.left ?? '0');
+
+    // dragOffset = how far the cursor is from the line's style.left position.
+    // On mousemove we subtract this so the line stays under the original click point.
+    dragOffsetRef.current = cursorPxInTimeline - lineLeftPx;
+
     isDragging.current = true;
-    // Signal to PreviewWindow RAF to back off during drag
-    playheadRef.current?.setAttribute('data-playhead-dragging', 'true');
+
+    // Signal to PreviewWindow RAF to stop writing style.left during drag.
+    // Set BEFORE adding listeners so the flag is live on the first mousemove.
+    playheadRef.current.setAttribute('data-playhead-dragging', 'true');
+
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   };
 
   // ── Keyboard frame stepping ──────────────────────────────────
-  // IMPROVEMENT #3: Bulletproof Keyboard Seeking Math
   // Uses integer frame arithmetic instead of floating-point addition,
   // so arrow keys never drift off frame boundaries over long timelines.
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -171,11 +219,11 @@ export function TimelinePlayhead({
   };
 
   return (
-    // IMPROVEMENT #1: Pixel-Perfect Line Centering
-    // The `transform: translateX(-50%)` on the `.playhead-line` CSS class
-    // shifts the element left by half its own width, so the visual centre
-    // of the 2px line sits exactly on the frame boundary — not its left edge.
-    // Add `transform: translateX(-50%);` to your `.playhead-line` CSS class.
+    // Note: if your CSS has `transform: translateX(-50%)` on `.playhead-line`,
+    // the visual centre of the 2px line sits exactly on the frame boundary.
+    // The drag-offset calculation above accounts for this correctly because it
+    // reads style.left (the mathematical position) rather than getBoundingClientRect
+    // (which would give the visually-shifted position).
     <div
       ref={playheadRef as React.RefObject<HTMLDivElement>}
       role="slider"

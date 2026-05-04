@@ -1419,6 +1419,13 @@ body {
   font-size: 11px;
 }
 
+span[contenteditable]:focus {
+  outline: 2px solid var(--ac-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+  background: rgba(124, 92, 252, 0.1) !important;
+}
+
 .tl-btn {
   display: flex;
   align-items: center;
@@ -2406,43 +2413,43 @@ button {
 .prop-inspector {
   width: 100%;
   height: 100%;
-  background: var(--ac-bg-panel);
-  border-left: 1px solid var(--ac-border);
+  background: #0f0f13;
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
   z-index: 10;
   color: #e2e2e8;
-  /* explicitly set fallback color */
 }
 
 .prop-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--ac-bg-elevated);
+  padding: 20px 16px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.02), transparent);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .prop-header-label {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  color: #888888;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  color: #7c5cfc;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
 }
 
 .prop-header-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
-  color: var(--ac-text-primary);
+  color: #ffffff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .prop-section {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--ac-bg-elevated);
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .prop-section-header {
@@ -2452,9 +2459,9 @@ button {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  color: #888888;
-  letter-spacing: 0.5px;
-  margin-bottom: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.8px;
+  margin-bottom: 16px;
 }
 
 .prop-section-action {
@@ -2601,6 +2608,25 @@ button {
 
 .prop-dot--green {
   background: #5dca8a;
+}
+
+.prop-apply-all-btn {
+  padding: 2px 8px;
+  background: var(--ac-accent-dim);
+  color: var(--ac-accent-text);
+  border: 1px solid rgba(124, 92, 252, 0.2);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s;
+  font-family: inherit;
+}
+
+.prop-apply-all-btn:hover {
+  background: var(--ac-accent);
+  color: #fff;
+  border-color: var(--ac-accent);
 }
 
 .prop-empty {

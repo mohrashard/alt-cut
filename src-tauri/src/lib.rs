@@ -260,6 +260,45 @@ fn run_pipeline(video_path: String) -> Result<(), String> {
 }
 
 // ──────────────────────────────────────────────────────────────
+// Fonts (stubs for the prompt)
+// ──────────────────────────────────────────────────────────────
+#[tauri::command]
+fn install_font(path: String) -> Result<String, String> {
+    println!("install_font called with: {}", path);
+    // Real implementation would copy to C:\Windows\Fonts or load via API
+    Ok(path)
+}
+
+#[tauri::command]
+fn get_system_fonts() -> Result<Vec<String>, String> {
+    let mut fonts = vec![
+        "Arial".into(), "Impact".into(), "Montserrat".into(), 
+        "Oswald".into(), "Bebas Neue".into()
+    ];
+    
+    // Quick Windows scan stub
+    if let Ok(entries) = std::fs::read_dir("C:\\Windows\\Fonts") {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                if ext.eq_ignore_ascii_case("ttf") || ext.eq_ignore_ascii_case("otf") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        let name = stem.replace("_", " ").replace("-", " ");
+                        if !fonts.contains(&name) {
+                            fonts.push(name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    fonts.sort();
+    fonts.dedup();
+    Ok(fonts)
+}
+
+// ──────────────────────────────────────────────────────────────
 // App entry point
 // ──────────────────────────────────────────────────────────────
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -286,6 +325,8 @@ pub fn run() {
             get_video_duration,
             run_ai_job,
             update_asset_path,
+            get_system_fonts,
+            install_font,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

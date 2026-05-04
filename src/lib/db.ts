@@ -33,7 +33,21 @@ export interface CaptionStyle {
   italic: boolean;
   uppercase: boolean;
   highlightColor: string;  // color applied to the currently-spoken word
-  animation: 'pop' | 'fade' | 'none';
+  animation: 'pop' | 'fade' | 'bounce' | 'shake' | 'zoom' | 'typewriter' | 'none';
+  x: number;
+  y: number;
+  lineBgEnabled: boolean;
+  lineBgPadding: number;
+  animDuration: number;
+  animEasing: 'spring' | 'linear' | 'ease';
+  karaokeFill: boolean;
+  shadowX: number;
+  shadowY: number;
+  shadowBlur: number;
+  lineHeight: number;
+  letterSpacing: number;
+  fadeInDuration: number;
+  fadeOutDuration: number;
 }
 
 export interface Transition {
@@ -215,6 +229,14 @@ export async function runMigrations(): Promise<void> {
     )
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS user_caption_presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      style_json TEXT NOT NULL
+    )
+  `);
+
   // Markers table
   await db.execute(`
     CREATE TABLE IF NOT EXISTS markers (
@@ -374,6 +396,17 @@ function sanitizeCaptionStyle(obj: any, key?: string): any {
       case 'strokeWidth': return 3;
       case 'glowSize': return 0;
       case 'bgOpacity': return 0;
+      case 'x': return 0;
+      case 'y': return 80;
+      case 'lineBgPadding': return 8;
+      case 'animDuration': return 0.3;
+      case 'shadowX': return 4;
+      case 'shadowY': return 4;
+      case 'shadowBlur': return 0;
+      case 'lineHeight': return 1.15;
+      case 'letterSpacing': return 0;
+      case 'fadeInDuration': return 0.2;
+      case 'fadeOutDuration': return 0.2;
       default: return 0;
     }
   }
@@ -403,6 +436,86 @@ export async function updateCaptionStyle(clipId: number, style: CaptionStyle): P
     return;
   }
   await db.execute('UPDATE timeline_clips SET caption_style=$1 WHERE id=$2', [styleStr, clipId]);
+}
+
+export async function updateCaptionText(clipId: number, wordsJson: string): Promise<void> {
+  const db = await getDb();
+  const clips = await db.select<TimelineClip[]>('SELECT asset_id FROM timeline_clips WHERE id = $1', [clipId]);
+  if (clips.length > 0) {
+    const assetId = clips[0].asset_id;
+    await db.execute('UPDATE assets SET file_path = $1 WHERE id = $2', [`text://${wordsJson}`, assetId]);
+  }
+}
+
+export async function updateCaptionWords(clipId: number, words: any[]): Promise<void> {
+  const db = await getDb();
+  const clips = await db.select<TimelineClip[]>(
+    'SELECT c.asset_id, a.file_path FROM timeline_clips c JOIN assets a ON c.asset_id = a.id WHERE c.id = $1',
+    [clipId]
+  );
+  if (clips.length > 0) {
+    const assetId = clips[0].asset_id;
+    const filePath = clips[0].file_path || '';
+    if (filePath.startsWith('text://')) {
+      try {
+        const chunkData = JSON.parse(filePath.substring(7));
+        chunkData.words = words;
+        chunkData.text = words.map((w: any) => w.word).join(' ');
+        await db.execute('UPDATE assets SET file_path = $1 WHERE id = $2', [`text://${JSON.stringify(chunkData)}`, assetId]);
+      } catch (e) {
+        console.error('Failed to parse chunkData in updateCaptionWords', e);
+      }
+    }
+  }
+}
+
+export async function exportCaptionsSrt(projectId: number): Promise<string> {
+  const db = await getDb();
+  const clips = await db.select<TimelineClip[]>(
+    `SELECT c.*, a.file_path 
+     FROM timeline_clips c 
+     JOIN assets a ON c.asset_id = a.id 
+     WHERE c.project_id = $1 AND c.track_type = 'text'
+     ORDER BY c.timeline_start ASC`,
+    [projectId]
+  );
+
+  let srt = '';
+  let idx = 1;
+
+  const formatTime = (seconds: number) => {
+    const hh = Math.floor(seconds / 3600).toString().padStart(2, '0');
+    const mm = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
+    const ss = Math.floor(seconds % 60).toString().padStart(2, '0');
+    const ms = Math.floor((seconds * 1000) % 1000).toString().padStart(3, '0');
+    return `${hh}:${mm}:${ss},${ms}`;
+  };
+
+  for (const clip of clips) {
+    if (clip.file_path?.startsWith('text://')) {
+      try {
+        const chunkData = JSON.parse(clip.file_path.substring(7));
+        const startSec = clip.timeline_start;
+        const endSec = clip.timeline_start + (clip.end_time - clip.start_time);
+        
+        srt += `${idx}\n${formatTime(startSec)} --> ${formatTime(endSec)}\n${chunkData.text || ''}\n\n`;
+        idx++;
+      } catch (e) {
+        console.error('Failed to parse chunkData for SRT export', e);
+      }
+    }
+  }
+  return srt;
+}
+
+export async function savePreset(name: string, style: CaptionStyle): Promise<void> {
+  const db = await getDb();
+  await db.execute('INSERT INTO user_caption_presets (name, style_json) VALUES ($1, $2)', [name, JSON.stringify(style)]);
+}
+
+export async function getUserPresets(): Promise<{id: number, name: string, style_json: string}[]> {
+  const db = await getDb();
+  return db.select('SELECT * FROM user_caption_presets ORDER BY id ASC');
 }
 
 export async function setAudioVolume(clipId: number, volume: number): Promise<void> {

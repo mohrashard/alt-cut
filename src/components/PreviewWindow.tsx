@@ -18,12 +18,13 @@ interface PreviewWindowProps {
   timecodeDomRef?: React.RefObject<HTMLSpanElement | null>;
   pps?: number;
   engineTimeRef?: React.MutableRefObject<number>;
+  onTimelineChange?: () => void;
 }
 
 export function PreviewWindow({
   clips, features, setFeatures, videoDuration = 0, playheadSeconds = 0,
   onPlayheadChange, playheadDomRef, timecodeDomRef, pps = 80,
-  engineTimeRef
+  engineTimeRef, onTimelineChange
 }: PreviewWindowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef    = useRef<PlayerRef>(null);
@@ -38,6 +39,9 @@ export function PreviewWindow({
       db.getAllTransitions().then(setTransitions);
     });
   }, [clips]);
+
+  const videoDurationRef = useRef(videoDuration);
+  useEffect(() => { videoDurationRef.current = videoDuration; }, [videoDuration]);
 
   // ── RAF loop: pure DOM mutation, zero React state updates during playback ──
   useEffect(() => {
@@ -62,7 +66,7 @@ export function PreviewWindow({
           playheadDomRef.current.style.left = `${sec * pps}px`;
         }
 
-        const text = `${fmtTime(sec)} / ${fmtTime(videoDuration)}`;
+        const text = `${fmtTime(sec)} / ${fmtTime(videoDurationRef.current)}`;
         if (timecodeDomRef?.current) {
           timecodeDomRef.current.textContent = text;
         }
@@ -74,7 +78,9 @@ export function PreviewWindow({
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [playheadDomRef, timecodeDomRef, pps, videoDuration, engineTimeRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playheadDomRef, timecodeDomRef, pps, engineTimeRef]);
+  // videoDuration intentionally excluded — fmtTime captures it via closure ref below
 
   // ── Sync React state on pause only (via Remotion's event API) ──
   useEffect(() => {
@@ -120,8 +126,9 @@ export function PreviewWindow({
       transitions,
       captionX: features?.captionX || 0,
       captionY: features?.captionY || 80,
+      onTimelineChange,
     };
-  }, [previewClips, features, transitions]);
+  }, [previewClips, features, transitions, onTimelineChange]);
 
   const playerDuration = Math.max(1, Math.round(videoDuration * 30));
 
@@ -200,7 +207,6 @@ export function PreviewWindow({
             {/* Caption drag handle */}
             {hasCaptions && (
               <div
-                onMouseDown={handleHandleMouseDown}
                 style={{
                   position: 'absolute',
                   top: `${features?.captionY ?? 80}%`,
@@ -212,9 +218,8 @@ export function PreviewWindow({
                     : '1px dashed rgba(255,204,0,0.4)',
                   borderRadius: '4px',
                   transform: 'translate(-50%, -50%)',
-                  cursor: 'move',
                   zIndex: 100,
-                  pointerEvents: 'auto',
+                  pointerEvents: 'none',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -222,19 +227,26 @@ export function PreviewWindow({
                   backgroundColor: 'rgba(255,204,0,0.02)',
                 }}
               >
-                {!isDragging && (
-                  <div style={{
-                    color: 'rgba(255,204,0,0.6)',
+                <div 
+                  onMouseDown={handleHandleMouseDown}
+                  style={{
+                    color: isDragging ? '#ffcc00' : 'rgba(255,204,0,0.6)',
                     fontSize: '8px',
                     position: 'absolute',
                     top: '-15px',
                     fontWeight: 700,
                     textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    Drag to move text
-                  </div>
-                )}
+                    letterSpacing: '0.5px',
+                    cursor: 'move',
+                    pointerEvents: 'auto',
+                    background: 'var(--ac-bg-base)',
+                    padding: '2px 4px',
+                    borderRadius: '2px',
+                    border: '1px solid rgba(255,204,0,0.2)'
+                  }}
+                >
+                  {isDragging ? 'Moving...' : 'Drag to move'}
+                </div>
               </div>
             )}
           </div>

@@ -21,6 +21,7 @@ interface PropertiesProps {
   selectedClip: TimelineClip | null;
   onFeaturesChange: (f: AppFeatures) => void;
   onTimelineChange: () => void;
+  playheadSeconds: number;
 }
 
 // ─── Status badge ────────────────────────────────────────────
@@ -40,13 +41,14 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
-export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChange }: PropertiesProps) {
+export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChange, playheadSeconds }: PropertiesProps) {
   const [features] = useState<AppFeatures>({
     fontFamily: 'Arial',
     captionX: 0,
     captionY: 80, // Default to bottom area
   });
   const [log, setLog] = useState<string>('');
+  const [clipScale, setClipScale] = useState<number>(100);
 
   useEffect(() => { onFeaturesChange(features); }, [features, onFeaturesChange]);
 
@@ -94,6 +96,123 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
       await db.updateCaptionStyle(currentClipId, newStyle);
       onTimelineChange();
     }, 300);
+  }, [selectedClip?.id, onTimelineChange]);
+
+  const handleApplyToAll = async () => {
+    if (!selectedClip) return;
+    const allClips = await db.getTimelineClips(selectedClip.project_id);
+    const textClips = allClips.filter(c => c.track_type === 'text');
+    
+    await Promise.all(textClips.map(clip => db.updateCaptionStyle(clip.id, localCaptionStyle)));
+    onTimelineChange();
+  };
+
+  const handleManualCaption = async () => {
+    const text = window.prompt("Enter caption text:");
+    if (!text) return;
+    
+    const projectId = selectedClip?.project_id || 1; 
+    const words = text.split(' ').map((w, i) => ({
+      word: w,
+      start: i * 0.5,
+      end: (i + 1) * 0.5
+    }));
+    const duration = words.length * 0.5;
+    const chunkData = { text, words };
+    const asset = await db.addAsset(projectId, `text://${JSON.stringify(chunkData)}`, 'text', duration);
+    await db.addClipToTimelineSpecific(
+      projectId,
+      asset.id,
+      duration,
+      'text',
+      0,
+      playheadSeconds
+    );
+    onTimelineChange();
+  };
+
+  // ── Caption Words State ─────────────────────────────────────
+  const [localWords, setLocalWords] = useState<any[]>([]);
+  const [localText, setLocalText] = useState<string>('');
+
+  useEffect(() => {
+    if (selectedClip?.track_type === 'text' && selectedClip.file_path?.startsWith('text://')) {
+      try {
+        const chunkData = JSON.parse(selectedClip.file_path.substring(7));
+        setLocalWords(chunkData.words || []);
+        setLocalText(chunkData.text || '');
+      } catch (e) {
+        setLocalWords([]);
+        setLocalText('');
+      }
+    } else {
+      setLocalWords([]);
+      setLocalText('');
+    }
+  }, [selectedClip?.file_path, selectedClip?.track_type, selectedClip?.id]);
+
+  const handleTextChange = (newText: string) => {
+    setLocalText(newText);
+    const currentClipId = selectedClip?.id;
+    if (!currentClipId) return;
+
+    if (wordsDebounceTimerRef.current) {
+      window.clearTimeout(wordsDebounceTimerRef.current);
+    }
+
+    wordsDebounceTimerRef.current = window.setTimeout(async () => {
+      const filePath = selectedClip.file_path || '';
+      if (filePath.startsWith('text://')) {
+        try {
+          const data = JSON.parse(filePath.substring(7));
+          const oldWords: any[] = data.words || [];
+          const newTokens = newText.trim().split(/\s+/).filter(Boolean);
+
+          // Rebuild words array preserving timing where possible
+          const mergedWords = newTokens.map((token, i) => {
+            if (oldWords[i]) {
+              return { ...oldWords[i], word: token };
+            }
+            // Append new words after the last known end time
+            const lastEnd = oldWords[oldWords.length - 1]?.end ?? 0;
+            return { word: token, start: lastEnd + i * 0.3, end: lastEnd + (i + 1) * 0.3 };
+          });
+
+          const updated = { ...data, text: newText, words: mergedWords };
+          await db.updateAssetFilePath(selectedClip.asset_id, `text://${JSON.stringify(updated)}`);
+          setLocalWords(updated.words || []);
+          onTimelineChange();
+        } catch {}
+      }
+    }, 300);
+  };
+
+  const wordsDebounceTimerRef = useRef<number | null>(null);
+  const wordsClipIdRef = useRef<number | string | null>(null);
+
+  const handleWordChange = useCallback((index: number, field: 'start' | 'end', value: number) => {
+    const currentClipId = selectedClip?.id;
+    if (!currentClipId) return;
+    
+    wordsClipIdRef.current = currentClipId;
+
+    setLocalWords(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+
+      if (wordsDebounceTimerRef.current) {
+        window.clearTimeout(wordsDebounceTimerRef.current);
+      }
+
+      wordsDebounceTimerRef.current = window.setTimeout(async () => {
+        if (wordsClipIdRef.current !== currentClipId) return;
+        await db.updateCaptionWords(currentClipId, next);
+        onTimelineChange();
+        setLocalText(next.map((w: any) => w.word).join(' '));
+      }, 300);
+
+      return next;
+    });
   }, [selectedClip?.id, onTimelineChange]);
 
   // ──────────────────────────────────────────────────────────
@@ -183,8 +302,14 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
           const relativeStart = clampedStart - clipStart;
           const timelineStart = selectedClip.timeline_start + relativeStart;
 
-          // Clone the chunk and update its start/end so TextClip calculates assetSeconds correctly
+          // Keep word timestamps absolute — TextClip compares assetSeconds (= chunkData.start + localTime)
+          // against wordObj.start / wordObj.end which are also absolute. Do NOT remap words.
           const chunkToSave = { ...chunk, start: clampedStart, end: clampedEnd };
+          // words are intentionally kept at their original absolute timestamps
+          // Ensure words array exists even if whisper omits it
+          if (!chunkToSave.words) {
+            chunkToSave.words = [];
+          }
 
           // Create dummy asset for text, storing the entire chunk JSON for word-level highlighting
           const chunkJson = JSON.stringify(chunkToSave);
@@ -220,6 +345,31 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
     }
   };
 
+  const handleExportSrt = async () => {
+    try {
+      const projectId = selectedClip?.project_id || 1;
+      const srt = await db.exportCaptionsSrt(projectId);
+      if (!srt || srt.trim().length === 0) {
+        alert('No captions found. Generate captions first using the Captions button.');
+        return;
+      }
+      const blob = new Blob([srt], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `captions_${Date.now()}.srt`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    } catch (err) {
+      alert(`SRT export failed: ${String(err)}`);
+    }
+  };
+
   // ──────────────────────────────────────────────────────────
   // Shorthand status helpers
   // ──────────────────────────────────────────────────────────
@@ -234,19 +384,133 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
   return (
     <div className="prop-inspector">
       {!selectedClip ? (
-        <div className="prop-empty">Select a clip to inspect</div>
+        <div className="prop-empty" style={{ flexDirection: 'column', textAlign: 'center', padding: '40px 20px' }}>
+          <div style={{ 
+            fontSize: '48px', 
+            marginBottom: '16px', 
+            opacity: 0.5,
+            filter: 'grayscale(1) brightness(1.5)'
+          }}>
+            🎯
+          </div>
+          <div style={{ fontWeight: 600, fontSize: '15px', color: 'var(--ac-text-primary)', marginBottom: '8px' }}>
+            Nothing Selected
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--ac-text-muted)', lineHeight: '1.6', maxWidth: '200px', marginBottom: '24px' }}>
+            Select a clip on the timeline to adjust its properties and style.
+          </div>
+          
+          <div style={{ width: '100%', height: '1px', background: 'linear-gradient(90deg, transparent, var(--ac-border-subtle), transparent)', marginBottom: '24px' }} />
+          
+          <button 
+            className="prop-ai-btn" 
+            style={{ 
+              width: '100%', 
+              height: '40px',
+              background: 'linear-gradient(135deg, #7c5cfc 0%, #5b3fd1 100%)',
+              boxShadow: '0 4px 12px rgba(124, 92, 252, 0.3)',
+              border: 'none',
+              borderRadius: '8px'
+            }}
+            onClick={handleManualCaption}
+          >
+            <span style={{ fontSize: '14px', marginRight: '6px' }}>+</span>
+            Add Manual Caption
+          </button>
+        </div>
       ) : (
         <>
           {/* ── Header ────────────────────────────────────── */}
           <div className="prop-header">
             <div className="prop-header-label">Inspector</div>
-            <div className="prop-header-title" title={selectedClip.file_path}>
-              {selectedClip.file_path?.split(/[/\\]/).pop() || 'Untitled Clip'}
-            </div>
+            {selectedClip.track_type === 'text' ? (
+              /* CapCut-style caption preview strip */
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #1a1040 0%, #0d0d1a 100%)',
+                  borderRadius: '8px',
+                  padding: '12px 16px',
+                  minHeight: '64px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                  position: 'relative',
+                  margin: '4px 0',
+                  border: '1px solid var(--ac-border)',
+                }}
+              >
+                {/* Glow bg if glow is set */}
+                {localCaptionStyle.glowSize > 0 && (
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    background: `radial-gradient(ellipse at center, ${localCaptionStyle.glowColor}22 0%, transparent 70%)`,
+                    pointerEvents: 'none',
+                  }} />
+                )}
+                <span
+                  style={{
+                    fontFamily: `"${localCaptionStyle.fontFamily}", Arial, sans-serif`,
+                    fontSize: `${Math.min(localCaptionStyle.fontSize * 0.25, 28)}px`,
+                    fontWeight: localCaptionStyle.bold ? 700 : 400,
+                    fontStyle: localCaptionStyle.italic ? 'italic' : 'normal',
+                    textTransform: localCaptionStyle.uppercase ? 'uppercase' : 'none',
+                    color: localCaptionStyle.highlightColor,
+                    WebkitTextStroke: localCaptionStyle.strokeWidth > 0
+                      ? `${Math.max(0.5, localCaptionStyle.strokeWidth * 0.3)}px ${localCaptionStyle.strokeColor}`
+                      : 'none',
+                    textShadow: localCaptionStyle.glowSize > 0
+                      ? `0 0 ${localCaptionStyle.glowSize}px ${localCaptionStyle.glowColor}, 0 0 ${localCaptionStyle.glowSize * 2}px ${localCaptionStyle.glowColor}`
+                      : localCaptionStyle.shadowBlur > 0
+                        ? `${localCaptionStyle.shadowX * 0.3}px ${localCaptionStyle.shadowY * 0.3}px ${localCaptionStyle.shadowBlur}px rgba(0,0,0,0.9)`
+                        : '0 2px 8px rgba(0,0,0,0.8)',
+                    letterSpacing: `${localCaptionStyle.letterSpacing}px`,
+                    lineHeight: localCaptionStyle.lineHeight,
+                    textAlign: 'center',
+                    maxWidth: '100%',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    position: 'relative',
+                    zIndex: 1,
+                  }}
+                >
+                  {localText || 'Caption Preview'}
+                </span>
+              </div>
+            ) : (
+              <div className="prop-header-title" title={selectedClip.file_path}>
+                {selectedClip.file_path?.split(/[/\\]/).pop() || 'Untitled Clip'}
+              </div>
+            )}
           </div>
 
           {/* ── Content area (scrollable) ─────────────────── */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            
+            {selectedClip.track_type === 'text' && (
+              <div className="prop-section">
+                <div className="prop-section-header">Edit Caption</div>
+                <textarea
+                  className="prop-textarea"
+                  value={localText}
+                  onChange={(e) => handleTextChange(e.target.value)}
+                  style={{
+                    width: '100%',
+                    minHeight: '80px',
+                    background: 'var(--ac-bg-overlay)',
+                    border: '1px solid var(--ac-border)',
+                    borderRadius: '6px',
+                    padding: '8px',
+                    color: 'var(--ac-text)',
+                    fontSize: '13px',
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            )}
             
             {/* ── Transform ───────────────────────────────── */}
             <div className="prop-section">
@@ -255,9 +519,16 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
               <div className="prop-slider-row">
                 <div className="prop-slider-label">Scale</div>
                 <div className="prop-slider-container">
-                  <input type="range" min="50" max="150" defaultValue="100" className="prop-range" />
+                  <input
+                    type="range"
+                    min="10"
+                    max="200"
+                    value={clipScale}
+                    className="prop-range"
+                    onChange={e => setClipScale(Number(e.target.value))}
+                  />
                 </div>
-                <div className="prop-slider-value">100%</div>
+                <div className="prop-slider-value">{clipScale}%</div>
               </div>
 
               <div className="prop-slider-row">
@@ -270,7 +541,12 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
                     value={(selectedClip.audio_volume || 1.0) * 100}
                     onChange={e => {
                       const vol = parseFloat(e.target.value) / 100;
-                      db.setAudioVolume(selectedClip.id, vol).then(onTimelineChange);
+                      // Optimistic update: update DB without triggering full re-render
+                      db.setAudioVolume(selectedClip.id, vol).catch(console.error);
+                    }}
+                    onMouseUp={e => {
+                      const vol = parseFloat((e.target as HTMLInputElement).value) / 100;
+                      db.setAudioVolume(selectedClip.id, vol).then(onTimelineChange).catch(console.error);
                     }}
                     className="prop-range"
                   />
@@ -282,12 +558,127 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
             {/* ── Caption Style Editor ─────── */}
             {(selectedClip.track_type === 'text' || selectedClip.ai_metadata?.['captions']?.status === 'completed' || !!selectedClip.ai_metadata?.['captions']?.json_data) && (
               <div className="prop-section">
-                <div className="prop-section-header">Caption Style</div>
+                <div className="prop-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Caption Style</span>
+                  <button className="prop-apply-all-btn" onClick={handleApplyToAll}>
+                    Apply to All
+                  </button>
+                </div>
                 <CaptionStyleEditor
                   clipId={String(selectedClip.id)}
                   currentStyle={localCaptionStyle}
                   onChange={handleCaptionStyleChange}
                 />
+              </div>
+            )}
+
+            {/* ── Words Editor ──────────────────────────────── */}
+            {selectedClip.track_type === 'text' && localWords.length > 0 && (
+              <div className="prop-section">
+                <div className="prop-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Word Timing</span>
+                  <span style={{ fontSize: '9px', color: 'var(--ac-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    click word to edit
+                  </span>
+                </div>
+                {/* Mini timeline: each word as a colored pill proportional to duration */}
+                <div style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '4px',
+                  padding: '8px 0',
+                  borderBottom: '1px solid var(--ac-border)',
+                  marginBottom: '8px',
+                }}>
+                  {localWords.map((w, idx) => {
+                    const dur = w.end - w.start;
+                    const totalDur = localWords[localWords.length - 1]?.end - localWords[0]?.start || 1;
+                    const widthPct = Math.max(8, (dur / totalDur) * 100);
+                    return (
+                      <div
+                        key={idx}
+                        title={`${w.word}: ${w.start.toFixed(2)}s → ${w.end.toFixed(2)}s`}
+                        style={{
+                          flex: `0 0 ${widthPct}%`,
+                          maxWidth: `${widthPct}%`,
+                          background: 'var(--ac-accent-dim)',
+                          border: '1px solid var(--ac-accent)',
+                          borderRadius: '4px',
+                          padding: '3px 5px',
+                          fontSize: '10px',
+                          color: 'var(--ac-accent-text)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          cursor: 'pointer',
+                          transition: 'background 0.1s',
+                        }}
+                      >
+                        {w.word}
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Editable rows */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {localWords.map((w, idx) => (
+                    <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 60px 60px 24px', gap: '6px', alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        value={w.word}
+                        onChange={e => {
+                          const next = [...localWords];
+                          next[idx] = { ...next[idx], word: e.target.value };
+                          setLocalWords(next);
+                        }}
+                        onBlur={() => handleWordChange(idx, 'start', localWords[idx].start)}
+                        style={{
+                          fontSize: '11px', padding: '3px 6px',
+                          background: 'var(--ac-bg-elevated)',
+                          border: '1px solid var(--ac-border)',
+                          color: 'var(--ac-text-primary)',
+                          borderRadius: '4px',
+                          outline: 'none',
+                          width: '100%',
+                        }}
+                      />
+                      <input
+                        type="number" step="0.01"
+                        value={w.start.toFixed(2)}
+                        onChange={e => handleWordChange(idx, 'start', parseFloat(e.target.value))}
+                        style={{ fontSize: '10px', padding: '3px 4px', background: 'var(--ac-bg-elevated)', border: '1px solid var(--ac-border)', color: 'var(--ac-text-muted)', borderRadius: '4px', width: '100%' }}
+                      />
+                      <input
+                        type="number" step="0.01"
+                        value={w.end.toFixed(2)}
+                        onChange={e => handleWordChange(idx, 'end', parseFloat(e.target.value))}
+                        style={{ fontSize: '10px', padding: '3px 4px', background: 'var(--ac-bg-elevated)', border: '1px solid var(--ac-border)', color: 'var(--ac-text-muted)', borderRadius: '4px', width: '100%' }}
+                      />
+                      <button
+                        onClick={() => {
+                          const next = localWords.filter((_, i) => i !== idx);
+                          setLocalWords(next);
+                          handleWordChange(idx, 'start', next[idx]?.start ?? 0);
+                        }}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--ac-text-muted)', cursor: 'pointer', fontSize: '13px', padding: 0 }}
+                        title="Delete word"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    const last = localWords[localWords.length - 1];
+                    const newWord = { word: 'word', start: last?.end ?? 0, end: (last?.end ?? 0) + 0.5 };
+                    const next = [...localWords, newWord];
+                    setLocalWords(next);
+                  }}
+                  style={{
+                    marginTop: '8px', width: '100%', padding: '5px', fontSize: '11px',
+                    background: 'transparent', border: '1px dashed var(--ac-border)',
+                    color: 'var(--ac-text-muted)', borderRadius: '4px', cursor: 'pointer',
+                  }}
+                >+ Add Word</button>
               </div>
             )}
 
@@ -313,6 +704,14 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
                 >
                   <div className="prop-dot prop-dot--green" />
                   {isDenoiseBusy ? 'Busy...' : 'Denoise'}
+                </button>
+                <button
+                  className="prop-ai-btn"
+                  onClick={handleExportSrt}
+                  title="Export captions as .srt file"
+                >
+                  <div className="prop-dot" style={{ background: '#3b82f6' }} />
+                  SRT
                 </button>
               </div>
               {log && (

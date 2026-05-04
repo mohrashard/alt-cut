@@ -1,5 +1,6 @@
-import type React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { CaptionStyle } from '../lib/db';
+import * as db from '../lib/db';
 import { CAPTION_PRESETS, getPreset } from '../lib/captionPresets';
 
 // ─── Types ────────────────────────────────────────────────────
@@ -40,6 +41,21 @@ const FONT_OPTIONS = [
   'Montserrat',
   'Oswald',
   'Bebas Neue',
+  'Proxima Nova',
+  'Roboto',
+  'Poppins',
+  'Raleway',
+  'Ubuntu',
+  'Lato',
+  'Open Sans',
+  'Nunito',
+  'Pacifico',
+  'Righteous',
+  'Anton',
+  'Bangers',
+  'Russo One',
+  'Teko',
+  'Barlow Condensed',
 ];
 
 // Human-readable preset display labels
@@ -285,9 +301,49 @@ function ToggleBtn({
 // ─── Main Component ───────────────────────────────────────────
 
 export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: Props) {
+  const [userPresets, setUserPresets] = useState<{id: number, name: string, style_json: string}[]>([]);
+  const [systemFonts, setSystemFonts] = useState<string[]>(FONT_OPTIONS);
+
+  useEffect(() => {
+    db.getUserPresets().then(setUserPresets).catch(console.error);
+    import('@tauri-apps/api/core').then(({ invoke }) => {
+      invoke<string[]>('get_system_fonts')
+        .then(fonts => {
+           setSystemFonts(prev => Array.from(new Set([...prev, ...fonts])).sort());
+        })
+        .catch(console.error);
+    }).catch(console.error);
+  }, []);
+
+  const handleSavePreset = async () => {
+    const name = window.prompt("Enter a name for your preset:");
+    if (!name) return;
+    await db.savePreset(name, currentStyle);
+    const updated = await db.getUserPresets();
+    setUserPresets(updated);
+  };
+
   const s = currentStyle;
   const set = <K extends keyof CaptionStyle>(key: K, value: CaptionStyle[K]) =>
     patch(s, key, value, onChange);
+
+  // Load Google Fonts for preview + rendering
+  useEffect(() => {
+    const googleFonts = [
+      'Montserrat', 'Oswald', 'Roboto', 'Poppins', 'Raleway',
+      'Ubuntu', 'Lato', 'Open+Sans', 'Nunito', 'Pacifico',
+      'Righteous', 'Anton', 'Bangers', 'Russo+One', 'Teko',
+      'Barlow+Condensed',
+    ];
+    const id = 'gfonts-caption-editor';
+    if (!document.getElementById(id)) {
+      const link = document.createElement('link');
+      link.id = id;
+      link.rel = 'stylesheet';
+      link.href = `https://fonts.googleapis.com/css2?${googleFonts.map(f => `family=${f}:wght@400;700`).join('&')}&display=swap`;
+      document.head.appendChild(link);
+    }
+  }, []);
 
   return (
     <div style={{
@@ -306,6 +362,9 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
           paddingBottom:   '4px',
           /* hide scrollbar but keep scroll */
           scrollbarWidth:  'none',
+          /* Show a subtle right-fade to hint scrollability */
+          maskImage: 'linear-gradient(to right, black 80%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to right, black 80%, transparent 100%)',
         }}>
           {CAPTION_PRESETS.map(preset => (
             <PresetCard
@@ -315,6 +374,39 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
               onClick={() => onChange(getPreset(preset.preset))}
             />
           ))}
+          {userPresets.map(up => {
+            let parsedStyle = s;
+            try { parsedStyle = JSON.parse(up.style_json); } catch {}
+            return (
+              <PresetCard
+                key={`user-${up.id}`}
+                preset={{ ...parsedStyle, preset: up.name }}
+                isActive={s.preset === up.name}
+                onClick={() => onChange({ ...parsedStyle, preset: up.name })}
+              />
+            );
+          })}
+          <button
+            onClick={handleSavePreset}
+            style={{
+              flexShrink: 0,
+              width: '80px',
+              height: '72px',
+              borderRadius: '8px',
+              border: '1.5px dashed var(--ac-border)',
+              background: 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'var(--ac-text-muted)',
+              fontSize: '11px',
+              fontWeight: 600,
+              transition: 'all 0.15s'
+            }}
+          >
+            + Save
+          </button>
         </div>
       </Section>
 
@@ -328,10 +420,41 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
             className="prop-select"
             style={{ flex: 1, fontSize: '11px' }}
           >
-            {FONT_OPTIONS.map(f => (
+            {Array.from(new Set([s.fontFamily, ...systemFonts])).map(f => (
               <option key={f} value={f}>{f}</option>
             ))}
           </select>
+          <input 
+            type="file" 
+            accept=".ttf,.otf" 
+            id="font-upload" 
+            style={{ display: 'none' }} 
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                const path = (file as any).path || file.name;
+                await invoke('install_font', { path });
+                const fonts = await invoke<string[]>('get_system_fonts');
+                setSystemFonts(prev => Array.from(new Set([...prev, ...fonts])).sort());
+              } catch (err) {
+                console.error(err);
+              }
+              e.target.value = '';
+            }}
+          />
+          <button 
+            title="Install Font"
+            onClick={() => document.getElementById('font-upload')?.click()}
+            style={{ 
+              fontSize: '11px', padding: '2px 6px', borderRadius: '4px', 
+              border: '1px solid var(--ac-border)', background: 'transparent', 
+              cursor: 'pointer', color: 'var(--ac-text-muted)'
+            }}
+          >
+            + Add
+          </button>
         </Row>
 
         {/* Font size */}
@@ -368,6 +491,24 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
             />
           </div>
         </Row>
+        {/* Line height */}
+        <Row label="Line H.">
+          <RangeInput
+            min={0.8} max={2.0} step={0.05}
+            value={s.lineHeight}
+            onChange={v => set('lineHeight', v)}
+          />
+        </Row>
+
+        {/* Letter spacing */}
+        <Row label="Letter S.">
+          <RangeInput
+            min={-5} max={20} step={0.5}
+            value={s.letterSpacing}
+            onChange={v => set('letterSpacing', v)}
+            formatValue={v => `${v}px`}
+          />
+        </Row>
       </Section>
 
       {/* ── Section 3: Colors ────────────────────────────── */}
@@ -388,21 +529,56 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
             onChange={v => set('strokeWidth', v)}
           />
         </Row>
+        <Row label="Shadow X">
+          <RangeInput
+            min={-20} max={20} step={1}
+            value={s.shadowX}
+            onChange={v => set('shadowX', v)}
+            formatValue={v => `${v}px`}
+          />
+        </Row>
+        <Row label="Shadow Y">
+          <RangeInput
+            min={-20} max={20} step={1}
+            value={s.shadowY}
+            onChange={v => set('shadowY', v)}
+            formatValue={v => `${v}px`}
+          />
+        </Row>
+        <Row label="Shadow Blur">
+          <RangeInput
+            min={0} max={20} step={1}
+            value={s.shadowBlur}
+            onChange={v => set('shadowBlur', v)}
+            formatValue={v => `${v}px`}
+          />
+        </Row>
       </Section>
 
       {/* ── Section 4: Effects ───────────────────────────── */}
       <Section label="Effects">
-        <Row label="Glow color">
+        <Row label="Glow Color">
           <ColorInput value={s.glowColor} onChange={v => set('glowColor', v)} />
         </Row>
-        <Row label="Glow size">
+        <Row label="Glow Size">
           <RangeInput
-            min={0} max={20} step={1}
+            min={0} max={40} step={1}
             value={s.glowSize}
             onChange={v => set('glowSize', v)}
+            formatValue={v => v === 0 ? 'Off' : `${v}px`}
           />
         </Row>
-        <Row label="BG opacity">
+        <Row label="Line BG">
+          <ToggleBtn
+            label="Enable"
+            active={s.lineBgEnabled}
+            onClick={() => set('lineBgEnabled', !s.lineBgEnabled)}
+          />
+          {s.lineBgEnabled && (
+            <ColorInput value={s.bgColor} onChange={v => set('bgColor', v)} />
+          )}
+        </Row>
+        <Row label="BG Opacity">
           <RangeInput
             min={0} max={100} step={1}
             value={Math.round(s.bgOpacity * 100)}
@@ -410,17 +586,75 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
             formatValue={v => `${v}%`}
           />
         </Row>
+        <Row label="Fade In">
+          <RangeInput
+            min={0} max={1} step={0.05}
+            value={s.fadeInDuration}
+            onChange={v => set('fadeInDuration', v)}
+            formatValue={v => `${v.toFixed(2)}s`}
+          />
+        </Row>
+        <Row label="Fade Out">
+          <RangeInput
+            min={0} max={1} step={0.05}
+            value={s.fadeOutDuration}
+            onChange={v => set('fadeOutDuration', v)}
+            formatValue={v => `${v.toFixed(2)}s`}
+          />
+        </Row>
         <Row label="Animation">
-          <div style={{ display: 'flex', gap: '5px' }}>
+          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
             {ANIMATION_OPTIONS.map(opt => (
               <ToggleBtn
                 key={opt.value}
                 label={opt.label}
                 active={s.animation === opt.value}
-                onClick={() => set('animation', opt.value)}
+                onClick={() => set('animation', opt.value as CaptionStyle['animation'])}
               />
             ))}
           </div>
+        </Row>
+        <Row label="Easing">
+          <div style={{ display: 'flex', gap: '5px' }}>
+            {(['spring', 'ease', 'linear'] as const).map(e => (
+              <ToggleBtn key={e} label={e} active={s.animEasing === e} onClick={() => set('animEasing', e)} />
+            ))}
+          </div>
+        </Row>
+        <Row label="Speed">
+          <RangeInput
+            min={0.05} max={1} step={0.05}
+            value={s.animDuration}
+            onChange={v => set('animDuration', v)}
+            formatValue={v => `${v.toFixed(2)}s`}
+          />
+        </Row>
+        <Row label="Karaoke">
+          <ToggleBtn
+            label={s.karaokeFill ? 'On' : 'Off'}
+            active={s.karaokeFill}
+            onClick={() => set('karaokeFill', !s.karaokeFill)}
+          />
+        </Row>
+      </Section>
+
+      {/* ── Section 5: Position ───────────────────────────── */}
+      <Section label="Position">
+        <Row label="X offset">
+          <RangeInput
+            min={-50} max={50} step={1}
+            value={s.x}
+            onChange={v => set('x', v)}
+            formatValue={v => `${v}%`}
+          />
+        </Row>
+        <Row label="Y offset">
+          <RangeInput
+            min={0} max={100} step={1}
+            value={s.y}
+            onChange={v => set('y', v)}
+            formatValue={v => `${v}%`}
+          />
         </Row>
       </Section>
 

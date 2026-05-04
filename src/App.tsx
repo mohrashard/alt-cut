@@ -288,6 +288,7 @@ function App() {
             pps={pps}
             videoDuration={videoDuration}
             engineTimeRef={engineTimeRef}
+            onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
           />
 
           <Timeline
@@ -320,6 +321,7 @@ function App() {
             onFeaturesChange={setFeatures}
             selectedClip={selectedClip}
             onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
+            playheadSeconds={playheadSeconds}
           />
         </div>
 
