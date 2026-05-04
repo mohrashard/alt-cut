@@ -22,6 +22,7 @@ interface PropertiesProps {
   onFeaturesChange: (f: AppFeatures) => void;
   onTimelineChange: () => void;
   playheadSeconds: number;
+  onStylePreview?: (clipId: number | string | null, style: CaptionStyle | null) => void;
 }
 
 // ─── Status badge ────────────────────────────────────────────
@@ -41,7 +42,9 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
-export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChange, playheadSeconds }: PropertiesProps) {
+export function PropertiesPanel({ 
+  selectedClip, onFeaturesChange, onTimelineChange, playheadSeconds, onStylePreview 
+}: PropertiesProps) {
   const [features] = useState<AppFeatures>({
     fontFamily: 'Arial',
     captionX: 0,
@@ -49,11 +52,20 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
   });
   const [log, setLog] = useState<string>('');
   const [clipScale, setClipScale] = useState<number>(100);
+  const [localVolume, setLocalVolume] = useState<number>(1.0);
+  const volumeDebounceRef = useRef<number | null>(null);
+  const scaleDebounceRef = useRef<number | null>(null);
+  const textSaveDebounceRef = useRef<number | null>(null);
+  const lastTextRef = useRef<string>('');
 
   useEffect(() => { onFeaturesChange(features); }, [features, onFeaturesChange]);
 
   // Reset log when clip changes
-  useEffect(() => { setLog(''); }, [selectedClip?.id]);
+  useEffect(() => {
+    setLog('');
+    setClipScale((selectedClip?.scale ?? 1.0) * 100);
+    setLocalVolume(selectedClip?.audio_volume ?? 1.0);
+  }, [selectedClip?.id]);
 
 
 
@@ -72,8 +84,9 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
     if (selectedClip?.id !== prevClipIdRef.current) {
       setLocalCaptionStyle(parsedCaptionStyle);
       prevClipIdRef.current = selectedClip?.id;
+      if (onStylePreview) onStylePreview(null, null);
     }
-  }, [parsedCaptionStyle, selectedClip?.id]);
+  }, [parsedCaptionStyle, selectedClip?.id, onStylePreview]);
 
   const clipIdRef = useRef<number | string | null>(null);
   const debounceTimerRef = useRef<number | null>(null);
@@ -82,6 +95,7 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
     const currentClipId = selectedClip?.id;
     if (!currentClipId) return;
     setLocalCaptionStyle(newStyle);
+    if (onStylePreview) onStylePreview(currentClipId, newStyle);
 
     clipIdRef.current = currentClipId;
 
@@ -153,67 +167,66 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
 
   const handleTextChange = (newText: string) => {
     setLocalText(newText);
+    lastTextRef.current = newText;
     const currentClipId = selectedClip?.id;
-    if (!currentClipId) return;
+    const currentAssetId = selectedClip?.asset_id;
+    if (!currentClipId || !currentAssetId) return;
 
-    if (wordsDebounceTimerRef.current) {
-      window.clearTimeout(wordsDebounceTimerRef.current);
-    }
-
-    wordsDebounceTimerRef.current = window.setTimeout(async () => {
-      const filePath = selectedClip.file_path || '';
+    // Immediately compute and sync UI
+    try {
+      const filePath = selectedClip?.file_path || '';
       if (filePath.startsWith('text://')) {
-        try {
-          const data = JSON.parse(filePath.substring(7));
-          const oldWords: any[] = data.words || [];
-          const newTokens = newText.trim().split(/\s+/).filter(Boolean);
-
-          // Rebuild words array preserving timing where possible
-          const mergedWords = newTokens.map((token, i) => {
-            if (oldWords[i]) {
-              return { ...oldWords[i], word: token };
-            }
-            // Append new words after the last known end time
-            const lastEnd = oldWords[oldWords.length - 1]?.end ?? 0;
-            return { word: token, start: lastEnd + i * 0.3, end: lastEnd + (i + 1) * 0.3 };
-          });
-
-          const updated = { ...data, text: newText, words: mergedWords };
-          await db.updateAssetFilePath(selectedClip.asset_id, `text://${JSON.stringify(updated)}`);
-          setLocalWords(updated.words || []);
-          onTimelineChange();
-        } catch {}
+        const data = JSON.parse(filePath.substring(7));
+        const oldWords = data.words || [];
+        const newTokens = newText.trim().split(/\s+/).filter(Boolean);
+        const mergedWords = newTokens.map((token, i) => {
+          if (oldWords[i]) return { ...oldWords[i], word: token };
+          const lastEnd = oldWords[oldWords.length - 1]?.end ?? 0;
+          return { word: token, start: lastEnd + i * 0.3, end: lastEnd + (i + 1) * 0.3 };
+        });
+        setLocalWords(mergedWords);
+        onTimelineChange(); // Trigger real-time preview update
       }
+    } catch (e) {}
+
+    if (textSaveDebounceRef.current) window.clearTimeout(textSaveDebounceRef.current);
+
+    textSaveDebounceRef.current = window.setTimeout(async () => {
+      const textToSave = lastTextRef.current;
+      const filePath = selectedClip?.file_path || '';
+      if (!filePath.startsWith('text://')) return;
+      try {
+        const data = JSON.parse(filePath.substring(7));
+        const oldWords = data.words || [];
+        const newTokens = textToSave.trim().split(/\s+/).filter(Boolean);
+        const finalMerged = newTokens.map((token, i) => {
+          if (oldWords[i]) return { ...oldWords[i], word: token };
+          const lastEnd = oldWords[oldWords.length - 1]?.end ?? 0;
+          return { word: token, start: lastEnd + i * 0.3, end: lastEnd + (i + 1) * 0.3 };
+        });
+        const updated = { ...data, text: textToSave, words: finalMerged };
+        await db.updateAssetFilePath(currentAssetId, `text://${JSON.stringify(updated)}`);
+      } catch (err) { console.error('Failed to save caption text:', err); }
     }, 300);
   };
 
   const wordsDebounceTimerRef = useRef<number | null>(null);
-  const wordsClipIdRef = useRef<number | string | null>(null);
 
   const handleWordChange = useCallback((index: number, field: 'start' | 'end', value: number) => {
     const currentClipId = selectedClip?.id;
     if (!currentClipId) return;
-    
-    wordsClipIdRef.current = currentClipId;
-
     setLocalWords(prev => {
       const next = [...prev];
+      if (!next[index]) return prev;
       next[index] = { ...next[index], [field]: value };
-
-      if (wordsDebounceTimerRef.current) {
-        window.clearTimeout(wordsDebounceTimerRef.current);
-      }
-
+      if (wordsDebounceTimerRef.current) window.clearTimeout(wordsDebounceTimerRef.current);
       wordsDebounceTimerRef.current = window.setTimeout(async () => {
-        if (wordsClipIdRef.current !== currentClipId) return;
-        await db.updateCaptionWords(currentClipId, next);
-        onTimelineChange();
-        setLocalText(next.map((w: any) => w.word).join(' '));
-      }, 300);
-
+        try { await db.updateCaptionWords(currentClipId, next); }
+        catch (err) { console.error('Failed to save word timing:', err); }
+      }, 400);
       return next;
     });
-  }, [selectedClip?.id, onTimelineChange]);
+  }, [selectedClip?.id]);
 
   // ──────────────────────────────────────────────────────────
   // Main AI job handler
@@ -267,6 +280,13 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
           throw new Error(`Caption JSON missing "chunks" array. Got: ${JSON.stringify(parsed).slice(0, 200)}`);
         }
 
+        // Sort words within each chunk by start time to ensure correct highlight order
+        for (const chunk of parsed.chunks) {
+          if (chunk.words && Array.isArray(chunk.words)) {
+            chunk.words.sort((a: any, b: any) => a.start - b.start);
+          }
+        }
+
         // Store in DB
         await db.upsertAiMetadata(clipId, step, 'completed', rawJson);
         
@@ -283,6 +303,7 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
         const clipStart = selectedClip.start_time;
         const clipEnd = selectedClip.end_time;
         let addedCount = 0;
+        const addedStarts = new Set<number>();
 
         // Auto-populate text track
         for (const chunk of parsed.chunks) {
@@ -302,14 +323,25 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
           const relativeStart = clampedStart - clipStart;
           const timelineStart = selectedClip.timeline_start + relativeStart;
 
+          // Safety deduplication check
+          const roundedStart = Math.round(timelineStart * 1000) / 1000;
+          if (addedStarts.has(roundedStart)) continue;
+          addedStarts.add(roundedStart);
+
           // Keep word timestamps absolute — TextClip compares assetSeconds (= chunkData.start + localTime)
-          // against wordObj.start / wordObj.end which are also absolute. Do NOT remap words.
-          const chunkToSave = { ...chunk, start: clampedStart, end: clampedEnd };
-          // words are intentionally kept at their original absolute timestamps
-          // Ensure words array exists even if whisper omits it
-          if (!chunkToSave.words) {
-            chunkToSave.words = [];
-          }
+          // against wordObj.start / wordObj.end which are also absolute.
+          // TODO: pass clip start_time offset to whisper-ctranslate2 via --offset flag 
+          // so word timestamps are relative to the full file correctly.
+          const chunkToSave = { 
+            ...chunk, 
+            start: clampedStart, 
+            end: clampedEnd,
+            words: (chunk.words || []).map((w: any) => ({
+              ...w,
+              start: w.start, // Absolute file time from Whisper
+              end: w.end,
+            }))
+          };
 
           // Create dummy asset for text, storing the entire chunk JSON for word-level highlighting
           const chunkJson = JSON.stringify(chunkToSave);
@@ -450,7 +482,7 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
                 )}
                 <span
                   style={{
-                    fontFamily: `"${localCaptionStyle.fontFamily}", Arial, sans-serif`,
+                    fontFamily: `"${localCaptionStyle.fontFamily}", "Inter", "Segoe UI", Roboto, Arial, sans-serif`,
                     fontSize: `${Math.min(localCaptionStyle.fontSize * 0.25, 28)}px`,
                     fontWeight: localCaptionStyle.bold ? 700 : 400,
                     fontStyle: localCaptionStyle.italic ? 'italic' : 'normal',
@@ -519,14 +551,15 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
               <div className="prop-slider-row">
                 <div className="prop-slider-label">Scale</div>
                 <div className="prop-slider-container">
-                  <input
-                    type="range"
-                    min="10"
-                    max="200"
-                    value={clipScale}
-                    className="prop-range"
-                    onChange={e => setClipScale(Number(e.target.value))}
-                  />
+                  <input type="range" min="10" max="200" value={clipScale} className="prop-range"
+                    onChange={e => {
+                      const val = Number(e.target.value);
+                      setClipScale(val);
+                      if (scaleDebounceRef.current) window.clearTimeout(scaleDebounceRef.current);
+                      scaleDebounceRef.current = window.setTimeout(() => {
+                        if (selectedClip) db.updateClipScale(selectedClip.id, val / 100).then(onTimelineChange).catch(console.error);
+                      }, 300);
+                    }} />
                 </div>
                 <div className="prop-slider-value">{clipScale}%</div>
               </div>
@@ -534,24 +567,17 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
               <div className="prop-slider-row">
                 <div className="prop-slider-label">Volume</div>
                 <div className="prop-slider-container">
-                  <input
-                    type="range"
-                    min="0"
-                    max="200"
-                    value={(selectedClip.audio_volume || 1.0) * 100}
+                  <input type="range" min="0" max="200" value={localVolume * 100} className="prop-range"
                     onChange={e => {
                       const vol = parseFloat(e.target.value) / 100;
-                      // Optimistic update: update DB without triggering full re-render
-                      db.setAudioVolume(selectedClip.id, vol).catch(console.error);
-                    }}
-                    onMouseUp={e => {
-                      const vol = parseFloat((e.target as HTMLInputElement).value) / 100;
-                      db.setAudioVolume(selectedClip.id, vol).then(onTimelineChange).catch(console.error);
-                    }}
-                    className="prop-range"
-                  />
+                      setLocalVolume(vol);
+                      if (volumeDebounceRef.current) window.clearTimeout(volumeDebounceRef.current);
+                      volumeDebounceRef.current = window.setTimeout(() => {
+                        if (selectedClip) db.setAudioVolume(selectedClip.id, vol).then(onTimelineChange).catch(console.error);
+                      }, 300);
+                    }} />
                 </div>
-                <div className="prop-slider-value">{Math.round((selectedClip.audio_volume || 1.0) * 100)}%</div>
+                <div className="prop-slider-value">{Math.round(localVolume * 100)}%</div>
               </div>
             </div>
 
@@ -592,15 +618,19 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
                 }}>
                   {localWords.map((w, idx) => {
                     const dur = w.end - w.start;
-                    const totalDur = localWords[localWords.length - 1]?.end - localWords[0]?.start || 1;
-                    const widthPct = Math.max(8, (dur / totalDur) * 100);
+                    const totalDur = localWords.reduce((acc, word, i) => {
+                      const wordDur = word.end - word.start;
+                      const gap = i < localWords.length - 1 ? Math.max(0, localWords[i + 1].start - word.end) : 0;
+                      return acc + wordDur + gap;
+                    }, 0) || 1;
+                    const widthPct = Math.max(5, (dur / totalDur) * 100);
                     return (
                       <div
-                        key={idx}
+                        key={`pill-${idx}-${w.word}`}
                         title={`${w.word}: ${w.start.toFixed(2)}s → ${w.end.toFixed(2)}s`}
                         style={{
-                          flex: `0 0 ${widthPct}%`,
-                          maxWidth: `${widthPct}%`,
+                          width: `${widthPct}%`,
+                          minWidth: '24px',
                           background: 'var(--ac-accent-dim)',
                           border: '1px solid var(--ac-accent)',
                           borderRadius: '4px',
@@ -658,7 +688,7 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
                         onClick={() => {
                           const next = localWords.filter((_, i) => i !== idx);
                           setLocalWords(next);
-                          handleWordChange(idx, 'start', next[idx]?.start ?? 0);
+                          if (selectedClip?.id) db.updateCaptionWords(selectedClip.id, next).catch(console.error);
                         }}
                         style={{ background: 'transparent', border: 'none', color: 'var(--ac-text-muted)', cursor: 'pointer', fontSize: '13px', padding: 0 }}
                         title="Delete word"
@@ -672,6 +702,7 @@ export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChan
                     const newWord = { word: 'word', start: last?.end ?? 0, end: (last?.end ?? 0) + 0.5 };
                     const next = [...localWords, newWord];
                     setLocalWords(next);
+                    if (selectedClip?.id) db.updateCaptionWords(selectedClip.id, next).catch(console.error);
                   }}
                   style={{
                     marginTop: '8px', width: '100%', padding: '5px', fontSize: '11px',

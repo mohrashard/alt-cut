@@ -29,6 +29,7 @@ function App() {
   const [selectedClipIds, setSelectedClipIds] = useState<number[]>([]);
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [highlightAssetId, setHighlightAssetId] = useState<number | null>(null);
+  const [styleOverride, setStyleOverride] = useState<{clipId: number|string; style: any} | null>(null);
 
   // ── Undo/Redo history (ref-based to avoid re-render on push) ─
   const historyRef      = useRef<TimelineClip[][]>([]);
@@ -140,6 +141,7 @@ function App() {
       await db.deleteTransition(prevClip.id, selectedClip.id);
     } else {
       await db.upsertTransition({
+        project_id: selectedClip.project_id,
         track_id: selectedClip.track_lane,
         clip_a_id: prevClip.id,
         clip_b_id: selectedClip.id,
@@ -209,8 +211,11 @@ function App() {
     }
     setIsRendering(true);
     try {
+      const db = await import('./lib/db');
+      const transitions = currentProject ? await db.getAllTransitions(currentProject.id) : [];
       const payload = {
         clips: timelineClips,
+        transitions,
         fontFamily: features?.fontFamily || 'Arial',
         animationStyle: 'hormozi',
         captionX: features?.captionX || 0,
@@ -289,6 +294,8 @@ function App() {
             videoDuration={videoDuration}
             engineTimeRef={engineTimeRef}
             onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
+            styleOverrides={styleOverride}
+            projectId={currentProject?.id}
           />
 
           <Timeline
@@ -322,6 +329,7 @@ function App() {
             selectedClip={selectedClip}
             onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
             playheadSeconds={playheadSeconds}
+            onStylePreview={(id, style) => setStyleOverride(id && style ? {clipId: id, style} : null)}
           />
         </div>
 

@@ -47,6 +47,7 @@ export function TimelinePlayhead({
   const magnetRef = useRef(magnetOn);
   const fpsRef = useRef(fps);
   const headRef = useRef<HTMLButtonElement>(null);
+  const lastLeftPx = useRef(initialLeftPx);
 
   // Keep refs in sync every render (safe, synchronous)
   ppsRef.current = pps;
@@ -59,6 +60,7 @@ export function TimelinePlayhead({
   useEffect(() => {
     if (playheadRef.current) {
       playheadRef.current.style.left = `${initialLeftPx}px`;
+      lastLeftPx.current = initialLeftPx;
     }
 
     // Subtracts the scrollbar height so the playhead line doesn't
@@ -79,6 +81,15 @@ export function TimelinePlayhead({
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!isDragging.current && playheadRef.current) {
+      const currentLeft = parseFloat(playheadRef.current.style.left || '0');
+      if (currentLeft === 0 && lastLeftPx.current > 0) {
+        playheadRef.current.style.left = `${lastLeftPx.current}px`;
+      }
+    }
+  });
 
   // ── Snap helper ──────────────────────────────────────────────
   const snapPx = (rawPx: number): number => {
@@ -121,6 +132,7 @@ export function TimelinePlayhead({
     const frameSec = frame / fpsRef.current;
 
     playheadRef.current.style.left = `${frameSec * ppsRef.current}px`;
+    lastLeftPx.current = frameSec * ppsRef.current;
   };
 
   const onMouseUp = (_e: MouseEvent) => {
@@ -154,6 +166,7 @@ export function TimelinePlayhead({
 
     // Immediately re-assert position so the RAF loop can't clobber it
     playheadRef.current.style.left = `${finalPx}px`;
+    lastLeftPx.current = finalPx;
 
     // Wait two frames: first frame = seek accepted by player,
     // second frame = RAF loop reads updated player time
@@ -215,6 +228,7 @@ export function TimelinePlayhead({
     const nextSec = Math.max(0, Math.min(totalDurRef.current, nextFrame / fpsRef.current));
 
     playheadRef.current.style.left = `${nextSec * ppsRef.current}px`;
+    lastLeftPx.current = nextSec * ppsRef.current;
     onSeek(nextSec);
   };
 

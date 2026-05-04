@@ -491,6 +491,37 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
             />
           </div>
         </Row>
+
+        {/* Alignment */}
+        <Row label="Align">
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {(['left', 'center', 'right'] as const).map(align => (
+              <button
+                key={align}
+                title={align.charAt(0).toUpperCase() + align.slice(1) + ' Align'}
+                onClick={() => set('textAlign', align)}
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: '5px',
+                  border: s.textAlign === align ? '1px solid var(--ac-accent)' : '1px solid var(--ac-border)',
+                  background: s.textAlign === align ? 'var(--ac-accent-dim)' : 'var(--ac-bg-elevated)',
+                  color: s.textAlign === align ? 'var(--ac-accent-text)' : 'var(--ac-text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.12s',
+                  minWidth: '32px'
+                }}
+              >
+                {align === 'left' && '⬅'}
+                {align === 'center' && '↔'}
+                {align === 'right' && '➡'}
+              </button>
+            ))}
+          </div>
+        </Row>
         {/* Line height */}
         <Row label="Line H.">
           <RangeInput

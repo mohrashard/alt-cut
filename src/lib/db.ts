@@ -46,12 +46,14 @@ export interface CaptionStyle {
   shadowBlur: number;
   lineHeight: number;
   letterSpacing: number;
+  textAlign: 'left' | 'center' | 'right';
   fadeInDuration: number;
   fadeOutDuration: number;
 }
 
 export interface Transition {
   id: number;
+  project_id: number;
   track_id: number;
   clip_a_id: number;
   clip_b_id: number;
@@ -106,6 +108,7 @@ export interface TimelineClip {
   timeline_start: number;
   audio_enabled: number;                     // 0 for muted, 1 for enabled
   audio_volume: number;                      // 1.0 is default, 0.0 is silent, >1.0 is gain
+  scale?: number;
   hidden: number;                            // 0 for visible, 1 for hidden
   audio_separated?: number;
   paired_audio_clip_id?: number | null;
@@ -216,10 +219,14 @@ export async function runMigrations(): Promise<void> {
   try {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN caption_style TEXT DEFAULT NULL`);
   } catch { /* column already exists */ }
+  try {
+    await db.execute(`ALTER TABLE timeline_clips ADD COLUMN scale REAL DEFAULT 1.0`);
+  } catch { /* column already exists */ }
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS transitions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
       track_id INTEGER NOT NULL,
       clip_a_id INTEGER NOT NULL,
       clip_b_id INTEGER NOT NULL,
@@ -228,6 +235,10 @@ export async function runMigrations(): Promise<void> {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  // Migrate existing rows: add project_id column if it doesn't exist yet
+  try {
+    await db.execute(`ALTER TABLE transitions ADD COLUMN project_id INTEGER NOT NULL DEFAULT 0`);
+  } catch { /* column already exists */ }
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS user_caption_presets (
@@ -395,10 +406,10 @@ function sanitizeCaptionStyle(obj: any, key?: string): any {
       case 'fontSize': return 72;
       case 'strokeWidth': return 3;
       case 'glowSize': return 0;
-      case 'bgOpacity': return 0;
+      case 'bgOpacity': return 0.85;
       case 'x': return 0;
       case 'y': return 80;
-      case 'lineBgPadding': return 8;
+      case 'lineBgPadding': return 12;
       case 'animDuration': return 0.3;
       case 'shadowX': return 4;
       case 'shadowY': return 4;
@@ -497,7 +508,7 @@ export async function exportCaptionsSrt(projectId: number): Promise<string> {
         const chunkData = JSON.parse(clip.file_path.substring(7));
         const startSec = clip.timeline_start;
         const endSec = clip.timeline_start + (clip.end_time - clip.start_time);
-        
+
         srt += `${idx}\n${formatTime(startSec)} --> ${formatTime(endSec)}\n${chunkData.text || ''}\n\n`;
         idx++;
       } catch (e) {
@@ -513,7 +524,7 @@ export async function savePreset(name: string, style: CaptionStyle): Promise<voi
   await db.execute('INSERT INTO user_caption_presets (name, style_json) VALUES ($1, $2)', [name, JSON.stringify(style)]);
 }
 
-export async function getUserPresets(): Promise<{id: number, name: string, style_json: string}[]> {
+export async function getUserPresets(): Promise<{ id: number, name: string, style_json: string }[]> {
   const db = await getDb();
   return db.select('SELECT * FROM user_caption_presets ORDER BY id ASC');
 }
@@ -590,9 +601,16 @@ export async function clearTextClips(projectId: number): Promise<void> {
 
 export async function clearTextClipsWithinBounds(projectId: number, minStart: number, maxStart: number): Promise<void> {
   const db = await getDb();
+  // Delete any text clip whose playback range overlaps [minStart, maxStart]
+  // Overlap condition: clip_timeline_start < maxStart AND (clip_timeline_start + clip_duration) > minStart
   await db.execute(
-    'DELETE FROM timeline_clips WHERE project_id = $1 AND track_type = $2 AND track_lane = 0 AND timeline_start >= $3 AND timeline_start <= $4',
-    [projectId, 'text', minStart, maxStart]
+    `DELETE FROM timeline_clips 
+     WHERE project_id = $1 
+       AND track_type = 'text' 
+       AND track_lane = 0
+       AND timeline_start < $3
+       AND (timeline_start + (end_time - start_time)) > $2`,
+    [projectId, minStart, maxStart]
   );
 }
 
@@ -683,6 +701,11 @@ export async function setAudioEnabled(clipId: number, enabled: boolean): Promise
   await db.execute('UPDATE timeline_clips SET audio_enabled = $1 WHERE id = $2', [enabled ? 1 : 0, clipId]);
 }
 
+export async function updateClipScale(clipId: number, scale: number): Promise<void> {
+  const db = await getDb();
+  await db.execute('UPDATE timeline_clips SET scale=$1 WHERE id=$2', [scale, clipId]);
+}
+
 // ─── Markers ──────────────────────────────────────────────────
 
 export async function addMarker(
@@ -741,16 +764,16 @@ export async function setAudioSeparated(
 
 // ─── Transitions ──────────────────────────────────────────────
 
-export async function getAllTransitions(): Promise<Transition[]> {
+export async function getAllTransitions(projectId: number): Promise<Transition[]> {
   const db = await getDb();
-  return db.select<Transition[]>('SELECT * FROM transitions');
+  return db.select<Transition[]>('SELECT * FROM transitions WHERE project_id = $1', [projectId]);
 }
 
 export async function upsertTransition(transition: Omit<Transition, 'id' | 'created_at'>): Promise<void> {
   const db = await getDb();
   const existing = await db.select<Transition[]>(
-    'SELECT * FROM transitions WHERE clip_a_id = $1 AND clip_b_id = $2',
-    [transition.clip_a_id, transition.clip_b_id]
+    'SELECT * FROM transitions WHERE clip_a_id = $1 AND clip_b_id = $2 AND project_id = $3',
+    [transition.clip_a_id, transition.clip_b_id, transition.project_id]
   );
 
   if (existing.length > 0) {
@@ -760,8 +783,8 @@ export async function upsertTransition(transition: Omit<Transition, 'id' | 'crea
     );
   } else {
     await db.execute(
-      'INSERT INTO transitions (track_id, clip_a_id, clip_b_id, type, duration_frames) VALUES ($1, $2, $3, $4, $5)',
-      [transition.track_id, transition.clip_a_id, transition.clip_b_id, transition.type, transition.duration_frames]
+      'INSERT INTO transitions (project_id, track_id, clip_a_id, clip_b_id, type, duration_frames) VALUES ($1, $2, $3, $4, $5, $6)',
+      [transition.project_id, transition.track_id, transition.clip_a_id, transition.clip_b_id, transition.type, transition.duration_frames]
     );
   }
 }

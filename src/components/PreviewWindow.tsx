@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import { Player, PlayerRef } from "@remotion/player";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { HormoziCaptions } from "../remotion/HormoziCaptions";
@@ -8,7 +8,7 @@ import type { TimelineClip, Transition } from "../lib/db";
 interface PreviewWindowProps {
   clips: TimelineClip[];
   features: AppFeatures | null;
-  setFeatures: (f: AppFeatures) => void;
+  setFeatures: (f: AppFeatures | null | ((prev: AppFeatures | null) => AppFeatures | null)) => void;
   videoDuration?: number;
   playheadSeconds?: number;
   onPlayheadChange?: (sec: number) => void;
@@ -19,26 +19,52 @@ interface PreviewWindowProps {
   pps?: number;
   engineTimeRef?: React.MutableRefObject<number>;
   onTimelineChange?: () => void;
+  styleOverrides?: { clipId: number | string; style: any } | null;
+  projectId?: number;
 }
 
 export function PreviewWindow({
   clips, features, setFeatures, videoDuration = 0, playheadSeconds = 0,
   onPlayheadChange, playheadDomRef, timecodeDomRef, pps = 80,
-  engineTimeRef, onTimelineChange
+  engineTimeRef, onTimelineChange, styleOverrides, projectId
 }: PreviewWindowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const playerRef    = useRef<PlayerRef>(null);
+  const playerRef = useRef<PlayerRef>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
   const [transitions, setTransitions] = useState<Transition[]>([]);
+
+  // Track whether the Player is actually mounted so the pause/play effect
+  // can reliably attach its listeners. Remotion doesn't expose an
+  // onMount/onReady prop, so we poll the ref after each render until it
+  // is populated, then flip this flag once.
+  const [playerMounted, setPlayerMounted] = useState(false);
+
+  // Runs after every render until playerRef.current is populated.
+  useEffect(() => {
+    if (playerRef.current && !playerMounted) {
+      setPlayerMounted(true);
+    }
+  });
 
   const previewTimecodeRef = useRef<HTMLSpanElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // Only re-fetch transitions when the set of clip IDs changes,
+  // not on every clips array reference change.
+  const clipIds = useMemo(
+    () => clips.map(c => c.id).join(','),
+    [clips]
+  );
+
   useEffect(() => {
+    if (projectId == null) return;
     import('../lib/db').then(db => {
-      db.getAllTransitions().then(setTransitions);
+      db.getAllTransitions(projectId)
+        .then(setTransitions)
+        .catch(err => console.error('[PreviewWindow] Failed to load transitions:', err));
     });
-  }, [clips]);
+  }, [clipIds, projectId]);
 
   const videoDurationRef = useRef(videoDuration);
   useEffect(() => { videoDurationRef.current = videoDuration; }, [videoDuration]);
@@ -46,10 +72,10 @@ export function PreviewWindow({
   // ── RAF loop: pure DOM mutation, zero React state updates during playback ──
   useEffect(() => {
     const fmtTime = (s: number) => {
-      const m  = Math.floor(s / 60);
+      const m = Math.floor(s / 60);
       const ss = Math.floor(s % 60);
       const ms = Math.floor((s % 1) * 10);
-      return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}.${ms}`;
+      return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${ms}`;
     };
 
     let raf: number;
@@ -57,7 +83,7 @@ export function PreviewWindow({
       if (playerRef.current) {
         const currentFrame = playerRef.current.getCurrentFrame();
         const sec = currentFrame / 30;
-        
+
         if (engineTimeRef) {
           engineTimeRef.current = sec;
         }
@@ -80,20 +106,26 @@ export function PreviewWindow({
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playheadDomRef, timecodeDomRef, pps, engineTimeRef]);
-  // videoDuration intentionally excluded — fmtTime captures it via closure ref below
+  // videoDuration intentionally excluded — fmtTime captures it via closure ref above
 
-  // ── Sync React state on pause only (via Remotion's event API) ──
+  // ── Sync React state on pause/play (via Remotion's event API) ──
+  //
+  // FIX: `playerMounted` is in the dependency array so this effect re-runs
+  // the moment the Player enters the DOM. Without it, the effect fires once
+  // on mount, finds playerRef.current === null (because <Player> isn't
+  // rendered when clips.length === 0), returns early, and never re-runs —
+  // leaving isPlaying permanently out of sync and onPlayheadChange unbound.
   useEffect(() => {
     const player = playerRef.current;
     if (!player) return;
-    
+
     const onPause = () => {
       setIsPlaying(false);
       if (onPlayheadChange) {
         onPlayheadChange(player.getCurrentFrame() / 30);
       }
     };
-    
+
     const onPlay = () => setIsPlaying(true);
 
     player.addEventListener('pause', onPause);
@@ -102,12 +134,12 @@ export function PreviewWindow({
       player.removeEventListener('pause', onPause);
       player.removeEventListener('play', onPlay);
     };
-  }, [onPlayheadChange]);
+  }, [onPlayheadChange, playerMounted]); // ← playerMounted ensures re-run after Player mounts
 
   // ── External seek (ruler click / drag): seek the player when paused ──
   useEffect(() => {
     if (!playerRef.current || videoDuration <= 0) return;
-    if (playerRef.current.isPlaying()) return; 
+    if (playerRef.current.isPlaying()) return;
     const frame = Math.round(playheadSeconds * 30);
     const current = playerRef.current.getCurrentFrame();
     if (Math.abs(current - frame) > 1) {
@@ -120,45 +152,71 @@ export function PreviewWindow({
     previewSrc: clip.file_path ? convertFileSrc(clip.file_path) : null,
   })), [clips]);
 
+  // Stable caption position values — extracted so the inputProps memo does NOT
+  // depend on the full `features` object, which changes on every drag pixel.
+  const captionX = features?.captionX ?? 0;
+  const captionY = features?.captionY ?? 80;
+
   const inputProps = useMemo(() => {
     return {
       clips: previewClips,
       transitions,
-      captionX: features?.captionX || 0,
-      captionY: features?.captionY || 80,
+      captionX,
+      captionY,
       onTimelineChange,
+      styleOverrides,
     };
-  }, [previewClips, features, transitions, onTimelineChange]);
+  }, [previewClips, captionX, captionY, transitions, onTimelineChange, styleOverrides]);
 
   const playerDuration = Math.max(1, Math.round(videoDuration * 30));
 
-  const handleHandleMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsDragging(true);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging) updatePosition(e);
-  };
-
-  const handleMouseUp = () => setIsDragging(false);
-
-  const updatePosition = (e: React.MouseEvent) => {
-    if (!containerRef.current || !features) return;
+  // Use a functional update so the drag never closes over a stale
+  // `features` snapshot captured at mousedown time.
+  const updatePosition = useCallback((e: MouseEvent) => {
+    if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const relX = (e.clientX - rect.left) / rect.width;
     const relY = (e.clientY - rect.top) / rect.height;
     const newX = Math.round((relX - 0.5) * 100);
     const newY = Math.round(relY * 100);
-    setFeatures({
-      ...features,
-      captionX: Math.max(-50, Math.min(50, newX)),
-      captionY: Math.max(0, Math.min(100, newY)),
+    setFeatures(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        captionX: Math.max(-50, Math.min(50, newX)),
+        captionY: Math.max(0, Math.min(100, newY)),
+      };
     });
+  }, [containerRef, setFeatures]);
+
+  const handleHandleMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsDragging(true);
+    isDraggingRef.current = true;
+
+    const onWindowMouseMove = (me: MouseEvent) => {
+      if (isDraggingRef.current) updatePosition(me);
+    };
+
+    const onWindowMouseUp = () => {
+      setIsDragging(false);
+      isDraggingRef.current = false;
+      window.removeEventListener('mousemove', onWindowMouseMove);
+      window.removeEventListener('mouseup', onWindowMouseUp);
+    };
+
+    window.addEventListener('mousemove', onWindowMouseMove);
+    window.addEventListener('mouseup', onWindowMouseUp);
   };
 
-  const hasCaptions = clips.some(c => c.ai_metadata?.['captions']?.status === 'completed');
-  
+  // Memoize hasCaptions to avoid recomputing on every render.
+  const hasCaptions = useMemo(
+    () =>
+      clips.some(c => c.ai_metadata?.['captions']?.status === 'completed') ||
+      clips.some(c => c.track_type === 'text'),
+    [clips]
+  );
+
   const togglePlay = () => {
     if (playerRef.current?.isPlaying()) {
       playerRef.current?.pause();
@@ -172,9 +230,11 @@ export function PreviewWindow({
     if (p) p.seekTo(Math.max(0, p.getCurrentFrame() - 30));
   };
 
+  // Clamp to playerDuration - 1 (last valid frame index) instead of
+  // playerDuration, which would be one frame past the end.
   const skipForward = () => {
     const p = playerRef.current;
-    if (p) p.seekTo(Math.min(playerDuration, p.getCurrentFrame() + 30));
+    if (p) p.seekTo(Math.min(playerDuration - 1, p.getCurrentFrame() + 30));
   };
 
   return (
@@ -186,9 +246,6 @@ export function PreviewWindow({
           <div
             className={`pw-player-wrapper ${isDragging ? 'dragging' : ''}`}
             ref={containerRef}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
           >
             <Player
               ref={playerRef}
@@ -202,6 +259,11 @@ export function PreviewWindow({
               controls={false}
               autoPlay
               loop
+              /* Note: Player does not support onError prop directly. Wrap with Error Boundary for handling. */
+              renderLoading={() => {
+                setPlayerMounted(false);
+                return null;
+              }}
             />
 
             {/* Caption drag handle */}
@@ -227,7 +289,7 @@ export function PreviewWindow({
                   backgroundColor: 'rgba(255,204,0,0.02)',
                 }}
               >
-                <div 
+                <div
                   onMouseDown={handleHandleMouseDown}
                   style={{
                     color: isDragging ? '#ffcc00' : 'rgba(255,204,0,0.6)',
@@ -255,7 +317,7 @@ export function PreviewWindow({
             <button className="pw-btn" onClick={skipBack} title="Back 1s">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
             </button>
-            
+
             <button className="pw-btn-play" onClick={togglePlay} title="Play/Pause">
               {isPlaying ? (
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
@@ -263,11 +325,11 @@ export function PreviewWindow({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '2px' }}><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
               )}
             </button>
-            
+
             <button className="pw-btn" onClick={skipForward} title="Forward 1s">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
             </button>
-            
+
             <span className="pw-timecode" ref={previewTimecodeRef}>00:00.0 / 00:00.0</span>
           </div>
 
@@ -284,4 +346,3 @@ export function PreviewWindow({
     </div>
   );
 }
-

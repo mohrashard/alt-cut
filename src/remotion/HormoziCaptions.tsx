@@ -3,7 +3,6 @@ import { AbsoluteFill, useCurrentFrame, useVideoConfig, Video, Audio, Sequence, 
 import { EffectWrapper } from './EffectWrapper';
 import { TransitionHandler } from './TransitionHandler';
 import type { ClipEffects, CaptionStyle, Transition } from '../lib/db';
-import * as db from '../lib/db';
 import { parseCaptionStyle } from '../lib/captionPresets';
 
 const DEFAULT_EFFECTS: ClipEffects = {
@@ -30,15 +29,18 @@ const hexToRgba = (hex: string, opacity: number) => {
 interface Props {
   clips: any[];
   transitions?: Transition[];
-  captionX?: number;
-  captionY?: number;
+  captionX?: number;   // ← now used
+  captionY?: number;   // ← now used
   onTimelineChange?: () => void;
+  styleOverrides?: { clipId: number | string; style: any } | null;
 }
 
 export const HormoziCaptions: React.FC<Props> = ({
   clips = [],
   transitions = [],
-  onTimelineChange,
+  captionX = 0,
+  captionY = 80,
+  styleOverrides
 }) => {
   const { fps } = useVideoConfig();
 
@@ -63,7 +65,7 @@ export const HormoziCaptions: React.FC<Props> = ({
 
               let parsedEffects = DEFAULT_EFFECTS;
               if (clip.effects) {
-                try { parsedEffects = { ...DEFAULT_EFFECTS, ...JSON.parse(clip.effects) }; } catch (e) {}
+                try { parsedEffects = { ...DEFAULT_EFFECTS, ...JSON.parse(clip.effects) }; } catch (e) { }
               }
 
               const clipDurSec = clip.end_time - clip.start_time;
@@ -115,7 +117,6 @@ export const HormoziCaptions: React.FC<Props> = ({
                 />
               </Sequence>
             );
-
           })}
 
           {/* Text/Caption tracks laid on top */}
@@ -145,7 +146,7 @@ export const HormoziCaptions: React.FC<Props> = ({
                   if (!chunkData) return null;
 
                   return (
-                    <Sequence 
+                    <Sequence
                       key={`txt-${clip.id}`}
                       from={startFrame}
                       durationInFrames={durationFrames}
@@ -154,7 +155,9 @@ export const HormoziCaptions: React.FC<Props> = ({
                         clip={clip}
                         chunkData={chunkData}
                         fps={fps}
-                        onTimelineChange={onTimelineChange}
+                        globalCaptionX={captionX}
+                        globalCaptionY={captionY}
+                        styleOverrides={styleOverrides}
                       />
                     </Sequence>
                   );
@@ -179,21 +182,32 @@ const TextClip: React.FC<{
   clip: any;
   chunkData: any;
   fps: number;
-  onTimelineChange?: () => void;
-}> = ({ clip, chunkData, fps, onTimelineChange }) => {
+  globalCaptionX?: number;
+  globalCaptionY?: number;
+  styleOverrides?: { clipId: number | string; style: any } | null;
+}> = ({ clip, chunkData, fps, globalCaptionX = 0, globalCaptionY = 0, styleOverrides }) => {
   const frame = useCurrentFrame();
 
   const captionStyle: CaptionStyle = useMemo(() => {
-    return parseCaptionStyle(
+    const base = parseCaptionStyle(
       typeof clip.caption_style === 'string' ? clip.caption_style : null
     );
-  }, [clip.caption_style]);
+    if (styleOverrides && styleOverrides.clipId === clip.id) {
+      return { ...base, ...styleOverrides.style };
+    }
+    return base;
+  }, [clip.caption_style, styleOverrides, clip.id]);
+
+  // Apply global offsets on top of the clip’s own position
+  const effectiveX = (captionStyle.x ?? 0) + globalCaptionX;
+  const effectiveY = (captionStyle.y ?? 80) + globalCaptionY;
 
   const sequenceLocalSeconds = frame / fps;
-  const chunkAbsoluteStart: number = chunkData.start ?? clip.start_time;
+  const clipLocalStart = clip.start_time ?? 0;
+  const chunkAbsoluteStart = chunkData.start ?? clipLocalStart;
   const assetSeconds = chunkAbsoluteStart + sequenceLocalSeconds;
 
-  const resolvedFontFamily = `"${captionStyle.fontFamily}", "Proxima Nova", "Arial Nova", Arial, sans-serif`;
+  const resolvedFontFamily = `"${captionStyle.fontFamily}", "Inter", "Segoe UI", Roboto, Arial, sans-serif`;
 
   const webkitTextStroke =
     captionStyle.strokeWidth > 0
@@ -203,7 +217,6 @@ const TextClip: React.FC<{
   const buildTextShadow = () => {
     const shadows: string[] = [];
     if (captionStyle.glowSize > 0) {
-      // Multiple layered glows for capcut-like bloom effect
       shadows.push(`0 0 ${captionStyle.glowSize}px ${captionStyle.glowColor}`);
       shadows.push(`0 0 ${captionStyle.glowSize * 2}px ${captionStyle.glowColor}`);
       shadows.push(`0 0 ${captionStyle.glowSize * 3}px ${captionStyle.glowColor}`);
@@ -219,22 +232,23 @@ const TextClip: React.FC<{
   };
 
   const words: any[] = useMemo(() => {
-    // Always use words array if available, fall back to splitting text
     if (chunkData.words && chunkData.words.length > 0) return chunkData.words;
-    const text: string = chunkData.text || '';
+    const text = chunkData.text || '';
     const tokens = text.trim().split(/\s+/).filter(Boolean);
-    const dur = Math.max(0.01, (chunkData.end ?? clip.end_time) - (chunkData.start ?? clip.start_time));
-    const perWord = dur / Math.max(tokens.length, 1);
+    const clipDuration = Math.max(0.01, clip.end_time - clip.start_time);
+    const perWord = clipDuration / Math.max(tokens.length, 1);
     return tokens.map((w: string, i: number) => ({
       word: w,
-      start: chunkAbsoluteStart + i * perWord,
-      end: chunkAbsoluteStart + (i + 1) * perWord,
+      start: clip.start_time + i * perWord,
+      end: clip.start_time + (i + 1) * perWord,
     }));
-  }, [chunkData.words, chunkData.text, chunkData.start, chunkData.end, clip.start_time, clip.end_time, chunkAbsoluteStart]);
+  }, [chunkData.words, chunkData.text, clip.start_time, clip.end_time]);
 
   const renderedWords = useMemo(() => {
     return words.map((wordObj: any, idx: number) => {
-      const isActive = assetSeconds >= wordObj.start && assetSeconds < wordObj.end;
+      const wordRelativeStart = wordObj.start - chunkAbsoluteStart;
+      const wordRelativeEnd = wordObj.end - chunkAbsoluteStart;
+      const isActive = sequenceLocalSeconds >= wordRelativeStart && sequenceLocalSeconds < wordRelativeEnd;
       const wordActiveFrames = Math.max(0, (assetSeconds - wordObj.start) * fps);
       const wordDuration = Math.max(0.01, wordObj.end - wordObj.start);
 
@@ -291,34 +305,6 @@ const TextClip: React.FC<{
       const activeColor = captionStyle.highlightColor;
       const inactiveColor = captionStyle.color;
 
-      const handleBlur = async (e: React.FocusEvent<HTMLSpanElement>) => {
-        const newText = e.currentTarget.innerText.trim();
-        if (!newText) return;
-        const newTokens = newText.split(/\s+/);
-        const updatedWords = [...words];
-        if (newTokens.length === 1) {
-          updatedWords[idx] = { ...updatedWords[idx], word: newTokens[0] };
-        } else {
-          const original = updatedWords[idx];
-          const dur = original.end - original.start;
-          const perWordDur = dur / newTokens.length;
-          const replacements = newTokens.map((w, i) => ({
-            ...original,
-            word: w,
-            start: original.start + i * perWordDur,
-            end: original.start + (i + 1) * perWordDur,
-          }));
-          updatedWords.splice(idx, 1, ...replacements);
-        }
-        const updatedChunk = {
-          ...chunkData,
-          text: updatedWords.map((w: any) => w.word).join(' '),
-          words: updatedWords,
-        };
-        await db.updateCaptionText(clip.id, JSON.stringify(updatedChunk));
-        onTimelineChange?.();
-      };
-
       const isKaraokeFill = captionStyle.karaokeFill && isActive;
       const fillPct = isKaraokeFill
         ? Math.max(0, Math.min(100, (wordActiveFrames / (wordDuration * fps)) * 100))
@@ -326,10 +312,7 @@ const TextClip: React.FC<{
 
       return (
         <span
-          key={`${wordObj.start ?? idx}-${idx}`}
-          contentEditable
-          suppressContentEditableWarning
-          onBlur={handleBlur}
+          key={`word-${wordObj.start ?? idx}-${idx}`}
           style={{
             color: isKaraokeFill ? inactiveColor : (isActive ? activeColor : inactiveColor),
             background: isActive && captionStyle.bgOpacity > 0
@@ -344,34 +327,27 @@ const TextClip: React.FC<{
             position: 'relative',
             opacity,
             letterSpacing: `${captionStyle.letterSpacing}px`,
-            padding: '0 2px',
+            padding: '0 4px',
+            borderRadius: '4px',
           }}
         >
           {isKaraokeFill ? (
             <>
               {wordObj.word}
               <span style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
+                position: 'absolute', left: 0, top: 0,
                 color: activeColor,
                 width: `${fillPct}%`,
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
-              }}>
-                {wordObj.word}
-              </span>
+              }}>{wordObj.word}</span>
             </>
-          ) : (
-            wordObj.word
-          )}
+          ) : wordObj.word}
         </span>
       );
     });
   }, [words, captionStyle, frame, assetSeconds, fps, clip.id, sequenceLocalSeconds]);
 
-  // X: captionStyle.x is -50 to +50 (% offset from center)
-  // Y: captionStyle.y is 0–100 (% from top)
   return (
     <AbsoluteFill
       style={{
@@ -385,27 +361,35 @@ const TextClip: React.FC<{
       <div
         style={{
           position: 'absolute',
-          top: `${captionStyle.y}%`,
-          left: `${50 + captionStyle.x}%`,
-          transform: 'translate(-50%, -50%)',
+          top: `${effectiveY}%`,
+          left: `${50 + effectiveX}%`,
+          transform: captionStyle.textAlign === 'left'
+            ? 'translate(0%, -50%)'
+            : captionStyle.textAlign === 'right'
+              ? 'translate(-100%, -50%)'
+              : 'translate(-50%, -50%)',
           width: '88%',
           maxWidth: '88%',
         }}
       >
         <div
           style={{
+            display: 'inline-block',
             background: captionStyle.lineBgEnabled
-              ? hexToRgba(captionStyle.bgColor, captionStyle.bgOpacity)
+              ? hexToRgba(captionStyle.bgColor, captionStyle.bgOpacity > 0 ? captionStyle.bgOpacity : 0.85)
               : 'transparent',
             borderRadius: 8,
             padding: captionStyle.lineBgEnabled ? `${captionStyle.lineBgPadding}px` : 0,
+            maxWidth: '100%',
           }}
         >
           <div
             style={{
               display: 'flex',
               flexWrap: 'wrap',
-              justifyContent: 'center',
+              justifyContent: captionStyle.textAlign === 'left' ? 'flex-start'
+                : captionStyle.textAlign === 'right' ? 'flex-end'
+                  : 'center',
               gap: '8px',
               width: '100%',
               fontFamily: resolvedFontFamily,
@@ -413,7 +397,7 @@ const TextClip: React.FC<{
               fontWeight: captionStyle.bold ? 700 : 400,
               fontStyle: captionStyle.italic ? 'italic' : 'normal',
               textTransform: captionStyle.uppercase ? 'uppercase' : 'none',
-              textAlign: 'center',
+              textAlign: captionStyle.textAlign,
               textShadow: buildTextShadow(),
               WebkitTextStroke: webkitTextStroke,
               lineHeight: captionStyle.lineHeight,
