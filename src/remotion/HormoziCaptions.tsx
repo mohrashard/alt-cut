@@ -29,7 +29,6 @@ const hexToRgba = (hex: string, opacity: number) => {
 interface Props {
   clips: any[];
   transitions?: Transition[];
-  fontFamily?: string;
   captionX?: number;
   captionY?: number;
 }
@@ -37,7 +36,6 @@ interface Props {
 export const HormoziCaptions: React.FC<Props> = ({
   clips = [],
   transitions = [],
-  fontFamily = 'Arial',
   captionX = 0,
   captionY = 80,
 }) => {

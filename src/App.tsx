@@ -212,7 +212,7 @@ function App() {
       const payload = {
         clips: timelineClips,
         fontFamily: features?.fontFamily || 'Arial',
-        animationStyle: features?.animationStyle || 'hormozi',
+        animationStyle: 'hormozi',
         captionX: features?.captionX || 0,
         captionY: features?.captionY || 80,
         durationInFrames: Math.max(1, Math.round(videoDuration * 30))

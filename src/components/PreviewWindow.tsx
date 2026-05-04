@@ -118,7 +118,6 @@ export function PreviewWindow({
     return {
       clips: previewClips,
       transitions,
-      fontFamily: features?.fontFamily || 'Arial',
       captionX: features?.captionX || 0,
       captionY: features?.captionY || 80,
     };

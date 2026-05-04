@@ -41,7 +41,7 @@ function StatusBadge({ status }: { status?: string }) {
 }
 
 export function PropertiesPanel({ selectedClip, onFeaturesChange, onTimelineChange }: PropertiesProps) {
-  const [features, setFeatures] = useState<AppFeatures>({
+  const [features] = useState<AppFeatures>({
     fontFamily: 'Arial',
     captionX: 0,
     captionY: 80, // Default to bottom area
