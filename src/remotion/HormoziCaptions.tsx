@@ -29,24 +29,25 @@ const hexToRgba = (hex: string, opacity: number) => {
 interface Props {
   clips: any[];
   transitions?: Transition[];
-  captionX?: number;   // ← now used
-  captionY?: number;   // ← now used
+  captionX?: number;
+  captionY?: number;
   onTimelineChange?: () => void;
   styleOverrides?: { clipId: number | string; style: any } | null;
 }
 
-export const HormoziCaptions: React.FC<Props> = ({
+export function HormoziCaptions({
   clips = [],
   transitions = [],
   captionX = 0,
   captionY = 80,
-  styleOverrides
-}) => {
+  styleOverrides,
+}: Props) {
   const { fps } = useVideoConfig();
 
-  const videoClips = clips.filter(c => !c.track_type || c.track_type === 'video');
-  const audioClips = clips.filter(c => c.track_type === 'audio');
-  const textClips = clips.filter(c => c.track_type === 'text');
+  const safeClips = Array.isArray(clips) ? clips : [];
+  const videoClips = safeClips.filter(c => !c.track_type || c.track_type === 'video');
+  const audioClips = safeClips.filter(c => c.track_type === 'audio');
+  const textClips = safeClips.filter(c => c.track_type === 'text');
 
   return (
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
@@ -72,7 +73,6 @@ export const HormoziCaptions: React.FC<Props> = ({
               const transInSec = transIn ? transIn.duration_frames / fps : 0;
               const transOutSec = transOut ? transOut.duration_frames / fps : 0;
 
-              // Render the solo part of the clip
               const soloStartSec = clip.timeline_start + transInSec;
               const soloDurSec = clipDurSec - transInSec - transOutSec;
               if (soloDurSec > 0) {
@@ -91,7 +91,6 @@ export const HormoziCaptions: React.FC<Props> = ({
                 );
               }
 
-              // Render the transition TO the next clip
               if (transOut && nextClip) {
                 const transStartFrame = secondsToFrame(clip.timeline_start + clipDurSec - transOutSec, fps);
                 elements.push(
@@ -119,7 +118,7 @@ export const HormoziCaptions: React.FC<Props> = ({
             );
           })}
 
-          {/* Text/Caption tracks laid on top */}
+          {/* Text/Caption tracks */}
           {(() => {
             const lanes = new Map<number, any[]>();
             textClips.forEach(c => {
@@ -175,7 +174,7 @@ export const HormoziCaptions: React.FC<Props> = ({
       )}
     </AbsoluteFill>
   );
-};
+}
 
 // ─── Individual Text/Caption Clip Overlay ─────────────────────
 const TextClip: React.FC<{
@@ -198,9 +197,6 @@ const TextClip: React.FC<{
     return base;
   }, [clip.caption_style, styleOverrides, clip.id]);
 
-  // Apply global offsets on top of the clip’s own position
-  // The global handle defaults to 80, and presets default to 80. 
-  // We treat globalCaptionY as the baseline (relative to 80) to avoid doubling.
   const effectiveX = (captionStyle.x ?? 0) + globalCaptionX;
   const effectiveY = (captionStyle.y ?? 0) + (globalCaptionY - 80);
 
@@ -293,7 +289,6 @@ const TextClip: React.FC<{
         opacity = isActive ? 1 : 0.35;
       }
 
-      // Fade in / out
       const clipDuration = Math.max(0.01, clip.end_time - clip.start_time);
       const clipProgress = sequenceLocalSeconds / clipDuration;
       let fadeMultiplier = 1;

@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useReducer } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DndContext, DragEndEvent, pointerWithin } from '@dnd-kit/core';
-import type { TimelineClip, Marker, ClipEffects } from './lib/db';
+import type { TimelineClip, Marker, ClipEffects, Transition } from './lib/db';
 
 import { TopNav } from "./components/TopNav";
 import { IconRail } from "./components/IconRail";
@@ -13,212 +13,275 @@ import { TransitionsSidebar } from "./components/TransitionsSidebar";
 import { EffectsSidebar } from "./components/EffectsSidebar";
 import "./App.css";
 
-// ─── App ─────────────────────────────────────────────────────
-function App() {
+// ═══════════════════════════════════════════════════════════════
+// 1. REDUCER-BASED HISTORY (Zero stale closures)
+// ═══════════════════════════════════════════════════════════════
+
+type HistoryState = {
+  past: TimelineClip[][];
+  present: TimelineClip[];
+  future: TimelineClip[][];
+};
+
+type HistoryAction =
+  | { type: 'INIT'; clips: TimelineClip[] }
+  | { type: 'SNAPSHOT'; clips: TimelineClip[] }
+  | { type: 'REPLACE'; clips: TimelineClip[] }
+  | { type: 'UNDO' }
+  | { type: 'REDO' };
+
+function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
+  switch (action.type) {
+    case 'INIT':
+      return { past: [], present: JSON.parse(JSON.stringify(action.clips)), future: [] };
+    case 'SNAPSHOT': {
+      const snap = JSON.parse(JSON.stringify(action.clips));
+      const last = state.past[state.past.length - 1];
+      if (last && JSON.stringify(last) === JSON.stringify(snap)) return state;
+      return { ...state, past: [...state.past, snap], future: [] };
+    }
+    case 'REPLACE':
+      return { ...state, present: JSON.parse(JSON.stringify(action.clips)), future: [] };
+    case 'UNDO': {
+      if (state.past.length === 0) return state;
+      const prev = state.past[state.past.length - 1];
+      return { past: state.past.slice(0, -1), present: prev, future: [state.present, ...state.future] };
+    }
+    case 'REDO': {
+      if (state.future.length === 0) return state;
+      const next = state.future[0];
+      return { past: [...state.past, state.present], present: next, future: state.future.slice(1) };
+    }
+  }
+}
+
+function useTimelineHistory() {
+  const [state, dispatch] = useReducer(historyReducer, { past: [], present: [], future: [] });
+  const initialized = useRef(false);
+
+  const init = useCallback((clips: TimelineClip[]) => {
+    if (initialized.current) return;
+    initialized.current = true;
+    dispatch({ type: 'INIT', clips });
+  }, []);
+
+  return useMemo(() => ({
+    present: state.present,
+    canUndo: state.past.length > 0,
+    canRedo: state.future.length > 0,
+    init,
+    snapshot: (clips: TimelineClip[]) => dispatch({ type: 'SNAPSHOT', clips }),
+    replace: (clips: TimelineClip[]) => dispatch({ type: 'REPLACE', clips }),
+    undo: () => dispatch({ type: 'UNDO' }),
+    redo: () => dispatch({ type: 'REDO' }),
+  }), [state.past.length, state.future.length, state.present, init]);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 2. PROJECT HOOK (Minimal — just loads the project row)
+// ═══════════════════════════════════════════════════════════════
+
+function useProject() {
+  const [project, setProject] = useState<any>(null);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    import('./lib/db').then(async db => {
+      await db.runMigrations();
+      const proj = await db.ensureDefaultProject();
+      if (!ctrl.signal.aborted) setProject(proj);
+    });
+    return () => ctrl.abort();
+  }, []);
+  return { project };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3. MAIN APP
+// ═══════════════════════════════════════════════════════════════
+
+export default function App() {
   const [isRendering, setIsRendering] = useState(false);
   const [features, setFeatures] = useState<AppFeatures | null>(null);
   const [activeToolTab, setActiveToolTab] = useState('media');
   const [playheadSeconds, setPlayheadSeconds] = useState(0);
-  const [pps, setPps] = useState(80); // mirrors Timeline's pps for PreviewWindow
-  const playheadDomRef = useRef<HTMLDivElement | null>(null);
-  const timecodeDomRef = useRef<HTMLSpanElement | null>(null);
-  const engineTimeRef = useRef<number>(0);
-
-  const [currentProject, setCurrentProject] = useState<any>(null);
-  const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
+  const [pps, setPps] = useState(80);
   const [selectedClipIds, setSelectedClipIds] = useState<number[]>([]);
-  const [markers, setMarkers] = useState<Marker[]>([]);
   const [highlightAssetId, setHighlightAssetId] = useState<number | null>(null);
   const [styleOverride, setStyleOverride] = useState<{ clipId: number | string; style: any } | null>(null);
+  const [transitions, setTransitions] = useState<Transition[]>([]);
 
-  // ── Undo/Redo history (ref-based to avoid re-render on push) ─
-  const historyRef = useRef<TimelineClip[][]>([]);
-  const historyIndexRef = useRef<number>(-1);
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
+  const playheadDomRef = useRef<HTMLDivElement>(null);
+  const timecodeDomRef = useRef<HTMLSpanElement>(null);
+  const engineTimeRef = useRef(0);
+  const clipsRef = useRef<TimelineClip[]>([]);
 
-  const selectedClips = timelineClips.filter(c => selectedClipIds.includes(c.id));
+  const { project } = useProject();
+  const history = useTimelineHistory();
+
+  // Local state derived from history (single source of truth)
+  const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
+  const [markers, setMarkers] = useState<Marker[]>([]);
+
+  // Sync ref so callbacks never stale
+  useEffect(() => { clipsRef.current = timelineClips; }, [timelineClips]);
+
+  // Sync history.present -> timelineClips (undo/redo/restore)
+  useEffect(() => {
+    setTimelineClips(history.present);
+  }, [history.present]);
+
+  // Initial load: DB -> history.init -> effect above sets timelineClips
+  useEffect(() => {
+    if (!project?.id) return;
+    const ctrl = new AbortController();
+    Promise.all([
+      import('./lib/db').then(db => db.getTimelineClips(project.id)),
+      import('./lib/db').then(db => db.getMarkers(project.id)),
+    ]).then(([clips, m]) => {
+      if (ctrl.signal.aborted) return;
+      setMarkers(m);
+      history.init(clips);
+    });
+    return () => ctrl.abort();
+  }, [project?.id, history]);
+
+  // Load transitions when clip IDs change
+  const clipIdsKey = useMemo(() => timelineClips.map(c => c.id).join(','), [timelineClips]);
+  useEffect(() => {
+    if (!project?.id) return;
+    let cancelled = false;
+    import('./lib/db').then(db => db.getAllTransitions(project.id)).then(t => {
+      if (!cancelled) setTransitions(t);
+    }).catch(console.error);
+    return () => { cancelled = true; };
+  }, [clipIdsKey, project?.id]);
+
+  // ─── Derived Selection ─────────────────────────────────────
+  const selectedClips = useMemo(
+    () => timelineClips.filter(c => selectedClipIds.includes(c.id)),
+    [timelineClips, selectedClipIds]
+  );
   const selectedClip = selectedClips.length === 1 ? selectedClips[0] : null;
 
-  const currentEffectsRaw = selectedClip?.effects;
-  const currentEffects: ClipEffects = useMemo(() => {
-    const defaultEffects = { brightness: 1.0, contrast: 1.0, saturation: 1.0, blur: 0, sharpen: 0 };
+  const currentEffects = useMemo(() => {
+    const defaults = { brightness: 1.0, contrast: 1.0, saturation: 1.0, blur: 0, sharpen: 0 };
+    if (!selectedClip?.effects) return defaults;
+    try { return { ...defaults, ...JSON.parse(selectedClip.effects) }; }
+    catch { return defaults; }
+  }, [selectedClip?.effects]);
+
+  // ─── Stable Callbacks (prevent Remotion remounts) ──────────
+  const handleTimelineChange = useCallback(async () => {
+    if (!project?.id) return;
+    const db = await import('./lib/db');
+    const clips = await db.getTimelineClips(project.id);
+    history.replace(clips);
+  }, [project?.id, history]);
+
+  const handleMarkersChange = useCallback(async () => {
+    if (!project?.id) return;
+    const db = await import('./lib/db');
+    setMarkers(await db.getMarkers(project.id));
+  }, [project?.id]);
+
+  const onBeforeChange = useCallback(() => {
+    history.snapshot(clipsRef.current);
+  }, [history]);
+
+  // ─── Mutations (ref-stable, history-aware) ─────────────────
+  const mutateTimeline = useCallback(async (mutateFn: () => Promise<void>) => {
+    history.snapshot(clipsRef.current);
     try {
-      return { ...defaultEffects, ...JSON.parse(currentEffectsRaw || '{}') };
-    } catch {
-      return defaultEffects;
-    }
-  }, [currentEffectsRaw]);
-
-  // Push current clips to the history stack before a mutation
-  const pushHistory = useCallback((clips: TimelineClip[]) => {
-    // Trim any forward (redo) history
-    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
-    historyRef.current.push(JSON.parse(JSON.stringify(clips)));
-    historyIndexRef.current = historyRef.current.length - 1;
-    setCanUndo(historyIndexRef.current > 0);
-    setCanRedo(false);
-  }, []);
-
-  const loadMarkers = useCallback(async (projectId: number) => {
-    const db = await import('./lib/db');
-    const m = await db.getMarkers(projectId);
-    setMarkers(m);
-  }, []);
-
-  const loadTimeline = useCallback(async (projectId: number) => {
-    const db = await import('./lib/db');
-    const clips = await db.getTimelineClips(projectId);
-    setTimelineClips(clips);
-    await loadMarkers(projectId);
-  }, [loadMarkers]);
-
-  const handleUndo = useCallback(async () => {
-    if (historyIndexRef.current <= 0) return;
-    historyIndexRef.current--;
-    const prevState = historyRef.current[historyIndexRef.current];
-    const db = await import('./lib/db');
-    if (currentProject) {
-      await db.restoreTimelineClips(currentProject.id, prevState);
-      setTimelineClips(prevState);
-      setSelectedClipIds([]); // Clear selection on undo
-    }
-    setCanUndo(historyIndexRef.current > 0);
-    setCanRedo(true);
-  }, [currentProject]);
-
-  const handleRedo = useCallback(async () => {
-    if (historyIndexRef.current >= historyRef.current.length - 1) return;
-    historyIndexRef.current++;
-    const nextState = historyRef.current[historyIndexRef.current];
-    const db = await import('./lib/db');
-    if (currentProject) {
-      await db.restoreTimelineClips(currentProject.id, nextState);
-      setTimelineClips(nextState);
-      setSelectedClipIds([]); // Clear selection on redo
-    }
-    setCanUndo(true);
-    setCanRedo(historyIndexRef.current < historyRef.current.length - 1);
-  }, [currentProject]);
-
-  useEffect(() => {
-    import('./lib/db').then(async (db) => {
-      try {
-        await db.runMigrations();
-        const project = await db.ensureDefaultProject();
-        setCurrentProject(project);
+      await mutateFn();
+      if (project?.id) {
+        const db = await import('./lib/db');
         const clips = await db.getTimelineClips(project.id);
-        setTimelineClips(clips);
-        await loadMarkers(project.id);
-        // Seed history with the initial loaded state
-        historyRef.current = [JSON.parse(JSON.stringify(clips))];
-        historyIndexRef.current = 0;
-        setCanUndo(false);
-        setCanRedo(false);
-      } catch (err) {
-        console.error('Failed to load project from DB:', err);
+        history.replace(clips);
       }
-    });
-  }, [loadMarkers]);
+    } catch (err) {
+      console.error("Mutation failed:", err);
+      // TODO: replace alert with toast
+    }
+  }, [history, project?.id]);
 
-  const handleMediaAdded = (_filePath: string) => { /* no-op */ };
-  const handleMediaSelected = (_path: string) => { /* no-op */ };
+  const handleAddClip = useCallback(async (asset: any, trackType: 'video' | 'audio' | 'text') => {
+    if (!project?.id) return;
+    await mutateTimeline(async () => {
+      const db = await import('./lib/db');
+      const dur = asset.duration > 0 ? asset.duration : 1.0;
+      await db.addClipToTimeline(project.id, asset.id, dur, trackType, 0);
+    });
+  }, [project?.id, mutateTimeline]);
 
   const handleApplyTransition = useCallback(async (transitionType: string) => {
-    if (!selectedClip) return;
-    const db = await import('./lib/db');
+    if (!selectedClip || !project?.id) return;
+    await mutateTimeline(async () => {
+      const db = await import('./lib/db');
+      const sameTrack = clipsRef.current
+        .filter(c => c.track_type === selectedClip.track_type && c.track_lane === selectedClip.track_lane)
+        .sort((a, b) => a.timeline_start - b.timeline_start);
 
-    const sameTrackClips = timelineClips.filter(
-      c => c.track_type === selectedClip.track_type && c.track_lane === selectedClip.track_lane
-    ).sort((a, b) => a.timeline_start - b.timeline_start);
-
-    const currentIndex = sameTrackClips.findIndex(c => c.id === selectedClip.id);
-    if (currentIndex <= 0) {
-      alert("Transitions require a preceding clip on the same track.");
-      return;
-    }
-    const prevClip = sameTrackClips[currentIndex - 1];
-
-    if (transitionType === 'none') {
-      await db.deleteTransition(prevClip.id, selectedClip.id);
-    } else {
-      await db.upsertTransition({
-        project_id: selectedClip.project_id,
-        track_id: selectedClip.track_lane,
-        clip_a_id: prevClip.id,
-        clip_b_id: selectedClip.id,
-        type: transitionType as any,
-        duration_frames: 15,
-      });
-    }
-  }, [selectedClip, timelineClips]);
+      const idx = sameTrack.findIndex(c => c.id === selectedClip.id);
+      if (idx <= 0) {
+        console.warn("Transitions require a preceding clip on the same track.");
+        return;
+      }
+      const prev = sameTrack[idx - 1];
+      if (transitionType === 'none') {
+        await db.deleteTransition(prev.id, selectedClip.id);
+      } else {
+        await db.upsertTransition({
+          project_id: project.id,
+          track_id: selectedClip.track_lane,
+          clip_a_id: prev.id,
+          clip_b_id: selectedClip.id,
+          type: transitionType as any,
+          duration_frames: 15
+        });
+      }
+    });
+  }, [selectedClip, project?.id, mutateTimeline]);
 
   const handleApplyEffects = useCallback(async (effects: ClipEffects) => {
     if (!selectedClip) return;
-    const db = await import('./lib/db');
-    await db.updateClipEffects(selectedClip.id, effects);
-    if (currentProject) {
-      await loadTimeline(currentProject.id);
-    }
-  }, [selectedClip, currentProject, loadTimeline]);
-
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!currentProject) return;
-
-    if (active.data.current?.type === 'Asset') {
-      const asset = active.data.current.asset;
+    await mutateTimeline(async () => {
       const db = await import('./lib/db');
-      const dur = asset.duration > 0 ? asset.duration : 1.0;
-
-      try {
-        if (over?.id === 'timeline-audio-droppable') {
-          await db.addClipToTimeline(currentProject.id, asset.id, dur, 'audio', 0);
-          pushHistory(timelineClips); // Push history after DB success
-        } else if (over?.id === 'timeline-droppable') {
-          const trackType = asset.type === 'audio' ? 'audio' : (asset.type === 'text' ? 'text' : 'video');
-          await db.addClipToTimeline(currentProject.id, asset.id, dur, trackType, 0);
-          pushHistory(timelineClips); // Push history after DB success
-        }
-        await loadTimeline(currentProject.id);
-      } catch (err) {
-        console.error("Failed to add clip to timeline", err);
-      }
-    }
-  };
-
-  // Compute the true end-time across ALL clips regardless of track order
-  const videoDuration = timelineClips.reduce((max, c) => {
-    const end = c.timeline_start + (c.end_time - c.start_time);
-    return end > max ? end : max;
-  }, 0);
+      await db.updateClipEffects(selectedClip.id, effects);
+    });
+  }, [selectedClip, mutateTimeline]);
 
   const handleClearTimeline = useCallback(async () => {
-    if (!currentProject) return;
+    if (!project?.id) return;
     if (!confirm('Clear the entire timeline?')) return;
-
-    const db = await import('./lib/db');
-
-    pushHistory(timelineClips); // Save snapshot before erasing
-
-    await db.clearTimelineClips(currentProject.id);
-    setTimelineClips([]);
+    await mutateTimeline(async () => {
+      const db = await import('./lib/db');
+      await db.clearTimelineClips(project.id);
+    });
     setSelectedClipIds([]);
-  }, [currentProject, timelineClips, pushHistory]);
+  }, [project?.id, mutateTimeline]);
 
-  const handleExport = async () => {
-    if (!(window as any).__TAURI_INTERNALS__) {
-      alert("❌ Run 'npm run tauri dev' to export.");
-      return;
-    }
-    if (timelineClips.length === 0) {
-      alert('⚠️ Add media to the timeline before exporting.');
-      return;
-    }
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!project?.id || active.data.current?.type !== 'Asset') return;
+    const asset = active.data.current.asset;
+    let trackType: 'video' | 'audio' | 'text' = 'video';
+    if (over?.id === 'timeline-audio-droppable') trackType = 'audio';
+    else if (asset.type === 'audio') trackType = 'audio';
+    else if (asset.type === 'text') trackType = 'text';
+    await handleAddClip(asset, trackType);
+  }, [project?.id, handleAddClip]);
+
+  const videoDuration = useMemo(() =>
+    timelineClips.reduce((max, c) => Math.max(max, c.timeline_start + (c.end_time - c.start_time)), 0),
+    [timelineClips]
+  );
+
+  const handleExport = useCallback(async () => {
+    if (!(window as any).__TAURI_INTERNALS__) return alert("❌ Please run 'npm run tauri dev' to export.");
+    if (timelineClips.length === 0) return alert('⚠️ Add media before exporting.');
+
     setIsRendering(true);
     try {
-      const db = await import('./lib/db');
-      const transitions = currentProject ? await db.getAllTransitions(currentProject.id) : [];
       const payload = {
         clips: timelineClips,
         transitions,
@@ -230,66 +293,70 @@ function App() {
       };
       await invoke('run_render_pipeline', { payloadJson: JSON.stringify(payload) });
       alert('✅ Export Successful!');
-    } catch (error) {
-      alert(`❌ Export Failed: ${error}`);
+    } catch (err: any) {
+      alert(`❌ Export Failed: ${err?.message || err}`);
     } finally {
       setIsRendering(false);
     }
-  };
+  }, [timelineClips, transitions, features, videoDuration]);
+
+  // ─── Global Keyboard Shortcuts ─────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      const meta = e.metaKey || e.ctrlKey;
+
+      if (meta && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) { if (history.canRedo) history.redo(); }
+        else { if (history.canUndo) history.undo(); }
+        setSelectedClipIds([]);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [history]);
+
+  const onUndo = useCallback(() => { history.undo(); setSelectedClipIds([]); }, [history]);
+  const onRedo = useCallback(() => { history.redo(); setSelectedClipIds([]); }, [history]);
 
   return (
     <DndContext onDragEnd={handleDragEnd} collisionDetection={pointerWithin}>
       <div className="app-shell">
-
-        {/* Top Nav */}
         <div className="layout-topbar">
           <TopNav
             isRendering={isRendering}
             onExport={handleExport}
             onClearTimeline={handleClearTimeline}
-            onUndo={handleUndo}
-            onRedo={handleRedo}
-            canUndo={canUndo}
-            canRedo={canRedo}
+            onUndo={onUndo}
+            onRedo={onRedo}
+            canUndo={history.canUndo}
+            canRedo={history.canRedo}
           />
         </div>
 
-        {/* Icon Rail */}
         <div className="layout-rail">
-          <IconRail
-            activeTab={activeToolTab}
-            onTabChange={setActiveToolTab}
-          />
+          <IconRail activeTab={activeToolTab} onTabChange={setActiveToolTab} />
         </div>
 
-        {/* Left Sidebar */}
         <div className="layout-left">
-          {activeToolTab === 'transitions' ? (
-            <TransitionsSidebar
-              selectedClipId={selectedClip?.id ? String(selectedClip.id) : null}
-              onApply={handleApplyTransition}
-            />
-          ) : activeToolTab === 'effects' ? (
-            <EffectsSidebar
-              selectedClipId={selectedClip?.id ? String(selectedClip.id) : null}
-              currentEffects={currentEffects}
-              onApply={handleApplyEffects}
-            />
-          ) : (
-            <MediaSidebar
-              projectId={currentProject?.id}
-              onMediaSelected={handleMediaSelected}
-              onMediaAdded={handleMediaAdded}
-              highlightAssetId={highlightAssetId}
-              onHighlightClear={() => setHighlightAssetId(null)}
-            />
-          )}
+          {/* UX NOTE: Use CSS visibility or a tab panel to avoid remounting */}
+          <div style={{ display: activeToolTab === 'transitions' ? 'contents' : 'none' }}>
+            <TransitionsSidebar selectedClipId={selectedClip?.id.toString() ?? null} onApply={handleApplyTransition} />
+          </div>
+          <div style={{ display: activeToolTab === 'effects' ? 'contents' : 'none' }}>
+            <EffectsSidebar selectedClipId={selectedClip?.id.toString() ?? null} currentEffects={currentEffects} onApply={handleApplyEffects} />
+          </div>
+          <div style={{ display: activeToolTab === 'media' ? 'contents' : 'none' }}>
+            <MediaSidebar projectId={project?.id} onMediaSelected={() => { }} onMediaAdded={() => { }} highlightAssetId={highlightAssetId} onHighlightClear={() => setHighlightAssetId(null)} />
+          </div>
         </div>
 
-        {/* Center Workspace */}
         <div className="layout-center">
           <PreviewWindow
             clips={timelineClips}
+            transitions={transitions}
             features={features}
             setFeatures={setFeatures}
             playheadSeconds={playheadSeconds}
@@ -299,9 +366,9 @@ function App() {
             pps={pps}
             videoDuration={videoDuration}
             engineTimeRef={engineTimeRef}
-            onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
+            onTimelineChange={handleTimelineChange}
             styleOverrides={styleOverride}
-            projectId={currentProject?.id}
+            projectId={project?.id}
           />
 
           <Timeline
@@ -311,15 +378,15 @@ function App() {
             onClipSelected={setSelectedClipIds}
             playheadSeconds={playheadSeconds}
             onPlayheadChange={setPlayheadSeconds}
-            onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
-            onBeforeChange={() => pushHistory(timelineClips)}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            onUndo={handleUndo}
-            onRedo={handleRedo}
+            onTimelineChange={handleTimelineChange}
+            onBeforeChange={onBeforeChange}
+            canUndo={history.canUndo}
+            canRedo={history.canRedo}
+            onUndo={onUndo}
+            onRedo={onRedo}
             markers={markers}
-            projectId={currentProject?.id ?? null}
-            onMarkersChange={() => currentProject && loadMarkers(currentProject.id)}
+            projectId={project?.id ?? null}
+            onMarkersChange={handleMarkersChange}
             playheadDomRef={playheadDomRef}
             onPpsChange={setPps}
             timecodeDomRef={timecodeDomRef}
@@ -328,20 +395,16 @@ function App() {
           />
         </div>
 
-        {/* Right Panel */}
         <div className="layout-right">
           <PropertiesPanel
             onFeaturesChange={setFeatures}
             selectedClip={selectedClip}
-            onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
+            onTimelineChange={handleTimelineChange}
             playheadSeconds={playheadSeconds}
             onStylePreview={(id, style) => setStyleOverride(id && style ? { clipId: id, style } : null)}
           />
         </div>
-
       </div>
     </DndContext>
   );
 }
-
-export default App;
