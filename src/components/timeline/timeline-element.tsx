@@ -161,11 +161,35 @@ function AudioContent({
 }
 
 // ─── Text / caption content ───────────────────────────────────
-function TextContent({ clip, dur }: { clip: TimelineClip; dur: number }) {
-  const label = clip.file_path?.split(/[/\\]/).pop() ?? '';
+function TextContent({ clip }: { clip: TimelineClip }) {
+  let label = 'Text';
+
+  if (clip.file_path?.startsWith('text://')) {
+    try {
+      // Extract the JSON payload after 'text://'
+      const jsonPayload = clip.file_path.substring(7);
+      const data = JSON.parse(jsonPayload);
+      // Grab the raw text to display in the block
+      label = data.text || 'Text';
+    } catch (e) {
+      // Fallback if it's raw text rather than JSON
+      label = clip.file_path.substring(7);
+    }
+  } else if (clip.file_path) {
+    // Standard file path fallback (for imported SRTs, etc.)
+    label = clip.file_path.split(/[/\\]/).pop() ?? 'Text';
+  }
+
   return (
-    <div className="clip-label">
-      <span>{dur >= 2 ? label : ''}</span>
+    <div className="clip-label" style={{
+      padding: '0 8px',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      width: '100%',
+      fontWeight: 600
+    }}>
+      <span>{label}</span>
     </div>
   );
 }
@@ -259,7 +283,7 @@ export function TimelineElement({
           onVolumeDragEnd={onVolumeDragEnd}
         />
       )}
-      {trackType === 'text' && <TextContent clip={clip} dur={dur} />}
+      {trackType === 'text' && <TextContent clip={clip} />}
 
       {isBusy && <span className="clip-busy-spin">⚙️</span>}
 
