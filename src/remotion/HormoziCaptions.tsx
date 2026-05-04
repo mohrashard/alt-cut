@@ -362,23 +362,28 @@ const TextClip: React.FC<{
         pointerEvents: 'auto',
       }}
     >
+      {/* 1. MASTER POSITIONING CONTAINER */}
       <div
         style={{
           position: 'absolute',
           top: `${effectiveY}%`,
           left: `${50 + effectiveX}%`,
-          transform: captionStyle.textAlign === 'left'
-            ? 'translate(0%, -50%)'
-            : captionStyle.textAlign === 'right'
-              ? 'translate(-100%, -50%)'
-              : 'translate(-50%, -50%)',
-          width: '88%',
-          maxWidth: '88%',
+          // FIX A: Lock transform to ALWAYS perfectly center on the dashed drag box
+          transform: 'translate(-50%, -50%)',
+          // FIX B: Match the PreviewWindow bounding box exact width
+          width: '85%',
+          maxWidth: '85%',
+          // FIX C: Force the inner background box to align based on user's textAlign choice
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: captionStyle.textAlign === 'left' ? 'flex-start'
+            : captionStyle.textAlign === 'right' ? 'flex-end'
+            : 'center',
         }}
       >
+        {/* 2. BACKGROUND & PADDING LAYER */}
         <div
           style={{
-            display: 'inline-block',
             background: captionStyle.lineBgEnabled
               ? hexToRgba(captionStyle.bgColor, captionStyle.bgOpacity > 0 ? captionStyle.bgOpacity : 0.85)
               : 'transparent',
@@ -387,6 +392,7 @@ const TextClip: React.FC<{
             maxWidth: '100%',
           }}
         >
+          {/* 3. TEXT LAYOUT LAYER */}
           <div
             style={{
               display: 'flex',
