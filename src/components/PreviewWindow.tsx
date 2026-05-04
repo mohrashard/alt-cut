@@ -162,6 +162,7 @@ export const PreviewWindow = memo(function PreviewWindow({
   const [playerMounted, setPlayerMounted] = useState(false);
   const [playerKey, setPlayerKey] = useState(0);
   const previewTimecodeRef = useRef<HTMLSpanElement>(null);
+  const lastPlayheadRef = useRef(playheadSeconds);
   const [isPlaying, setIsPlaying] = useState(false);
   const fmtTime = useFrameAccurateTimecode(30);
 
@@ -170,10 +171,17 @@ export const PreviewWindow = memo(function PreviewWindow({
     setPlayerMounted(!!node);
   }, []);
 
-  // Memoized asset URLs
+  // ⚠️ CRITICAL: DO NOT REMOVE JSON.stringify HASHES. 
+  // These prevent Remotion player remounting/audio-stutter by ensuring 
+  // inputProps only change when the actual DATA changes, not just object references.
+  const clipsHash = JSON.stringify(clips);
+  const transitionsHash = JSON.stringify(transitions);
+  const styleOverridesHash = JSON.stringify(styleOverrides);
+
+  // 2. Memoize asset URLs based on the hash
   const previewClips = useMemo(() =>
     clips.map(c => ({ ...c, previewSrc: c.file_path ? convertFileSrc(c.file_path) : null })),
-    [clips]
+    [clipsHash]
   );
 
   const captionX = features?.captionX ?? 0;
@@ -191,7 +199,7 @@ export const PreviewWindow = memo(function PreviewWindow({
     onChange: handleCaptionChange
   });
 
-  // Stable inputProps — CRITICAL to prevent Remotion remounting
+  // 3. Stable inputProps — CRITICAL to prevent Remotion audio stuttering
   const inputProps = useMemo(() => ({
     clips: previewClips,
     transitions,
@@ -199,7 +207,15 @@ export const PreviewWindow = memo(function PreviewWindow({
     captionY: displayY,
     onTimelineChange,
     styleOverrides
-  }), [previewClips, transitions, displayX, displayY, onTimelineChange, styleOverrides]);
+  }), [
+    previewClips,
+    transitionsHash,
+    displayX,
+    displayY,
+    styleOverridesHash
+    // Notice: we intentionally omit `onTimelineChange` from this array.
+    // If the parent passes an inline function () => {}, it changes every render.
+  ]);
 
   const playerDuration = Math.max(1, Math.round(videoDuration * 30));
 
@@ -228,34 +244,55 @@ export const PreviewWindow = memo(function PreviewWindow({
     return () => cancelAnimationFrame(raf);
   }, [playerMounted, pps, videoDuration, engineTimeRef, playheadDomRef, timecodeDomRef, fmtTime]);
 
-  // ═══ Sync external playhead (only when paused) ═══
+  // ═══ Sync external playhead (FOREVER FIX) ═══
   useEffect(() => {
     const player = playerRef.current;
-    if (!player || videoDuration <= 0 || player.isPlaying()) return;
-    const target = Math.round(playheadSeconds * 30);
-    if (Math.abs(player.getCurrentFrame() - target) > 1) {
-      player.seekTo(target);
+    if (!player || videoDuration <= 0) return;
+
+    // ⚠️ CRITICAL: ONLY seek if the parent explicitly passed a newly updated playhead time.
+    // This prevents Remotion's internal buffering pauses from triggering a backwards seek!
+    // Removing lastPlayheadRef check will cause immediate audio stuttering in Tauri.
+    if (lastPlayheadRef.current !== playheadSeconds) {
+      lastPlayheadRef.current = playheadSeconds;
+      
+      const target = Math.round(playheadSeconds * 30);
+      if (Math.abs(player.getCurrentFrame() - target) > 2) {
+        player.seekTo(target);
+      }
     }
   }, [playheadSeconds, videoDuration]);
 
-  // ═══ Player listeners ═══
+  // ═══ Player listeners (DEBOUNCED) ═══
   useEffect(() => {
     const player = playerRef.current;
     if (!player) return;
+    
+    let pauseTimeout: number;
+
     const onPause = () => {
-      setIsPlaying(false);
-      onPlayheadChange?.(player.getCurrentFrame() / 30);
+      // ⚠️ CRITICAL DEBOUNCE: If the video stutters for 100ms to load a chunk (Tauri stream boundary),
+      // we MUST NOT update app state or we trigger a re-render/forced-seek loop (audio stutter).
+      pauseTimeout = window.setTimeout(() => {
+        setIsPlaying(false);
+        onPlayheadChange?.(player.getCurrentFrame() / 30);
+      }, 150); // 150ms buffer zone
     };
-    const onPlay = () => setIsPlaying(true);
+
+    const onPlay = () => {
+      window.clearTimeout(pauseTimeout);
+      setIsPlaying(true);
+    };
+
     player.addEventListener('pause', onPause);
     player.addEventListener('play', onPlay);
     return () => {
+      window.clearTimeout(pauseTimeout);
       player.removeEventListener('pause', onPause);
       player.removeEventListener('play', onPlay);
     };
   }, [onPlayheadChange, playerMounted]);
 
-  // ═══ Keyboard shortcuts ═══
+  // ═══ Keyboard shortcuts (improved focus checks) ═══
   const togglePlay = useCallback(() => {
     const p = playerRef.current;
     if (!p) return;
@@ -277,7 +314,22 @@ export const PreviewWindow = memo(function PreviewWindow({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+      // 1. Ignore if user is typing in any editable element
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable ||
+        target.closest('[contenteditable="true"]')
+      ) {
+        return;
+      }
+
+      // 2. Ignore if a dialog or modal is open somewhere on the page
+      if (document.activeElement?.closest('[role="dialog"], [aria-modal="true"]')) {
+        return;
+      }
+
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
       else if (e.code === 'ArrowLeft') { e.preventDefault(); skipBack(); }
       else if (e.code === 'ArrowRight') { e.preventDefault(); skipForward(); }
@@ -290,6 +342,30 @@ export const PreviewWindow = memo(function PreviewWindow({
     clips.some(c => c.ai_metadata?.['captions']?.status === 'completed' || c.track_type === 'text'),
     [clips]
   );
+
+  // ── Tooltip flip logic to avoid clipping ──
+  const tooltipBelowCaption = displayY < 12; // when caption near top, show tooltip below box
+  const tooltipStyle: React.CSSProperties = {
+    position: 'absolute',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    pointerEvents: 'none',
+    whiteSpace: 'nowrap',
+    background: 'var(--ac-accent)',
+    padding: '2px 8px',
+    borderRadius: 4,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+    opacity: isDragging ? 1 : 0,
+    transition: 'opacity 0.2s',
+    ...(tooltipBelowCaption
+      ? { bottom: -28, top: 'auto' }
+      : { top: -28, bottom: 'auto' }
+    )
+  };
 
   return (
     <div className="preview-area">
@@ -413,14 +489,8 @@ export const PreviewWindow = memo(function PreviewWindow({
                   }} />
                 )}
 
-                {/* Position tooltip */}
-                <div style={{
-                  position: 'absolute', top: -28, left: '50%', transform: 'translateX(-50%)',
-                  color: '#fff', fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
-                  pointerEvents: 'none', whiteSpace: 'nowrap', background: 'var(--ac-accent)',
-                  padding: '2px 8px', borderRadius: 4, opacity: isDragging ? 1 : 0,
-                  transition: 'opacity 0.2s', boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-                }}>
+                {/* Position tooltip – now flips to avoid clipping */}
+                <div style={tooltipStyle}>
                   {`X: ${displayX}  Y: ${displayY}`}
                 </div>
               </div>
@@ -428,12 +498,22 @@ export const PreviewWindow = memo(function PreviewWindow({
           </div>
 
           <div className="pw-controls">
-            <button className="pw-btn" onClick={skipBack} title="Back 1s (←)">
+            <button
+              className="pw-btn"
+              onClick={skipBack}
+              title="Back 1s (←)"
+              aria-label="Skip back 1 second"
+            >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="19 20 9 12 19 4 19 20" /><line x1="5" y1="19" x2="5" y2="5" />
               </svg>
             </button>
-            <button className="pw-btn-play" onClick={togglePlay} title="Play/Pause (Space)">
+            <button
+              className="pw-btn-play"
+              onClick={togglePlay}
+              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+              aria-label={isPlaying ? 'Pause video' : 'Play video'}
+            >
               {isPlaying ? (
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
@@ -444,7 +524,12 @@ export const PreviewWindow = memo(function PreviewWindow({
                 </svg>
               )}
             </button>
-            <button className="pw-btn" onClick={skipForward} title="Forward 1s (→)">
+            <button
+              className="pw-btn"
+              onClick={skipForward}
+              title="Forward 1s (→)"
+              aria-label="Skip forward 1 second"
+            >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="5 4 15 12 5 20 5 4" /><line x1="19" y1="5" x2="19" y2="19" />
               </svg>

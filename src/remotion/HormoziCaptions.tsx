@@ -85,6 +85,9 @@ export function HormoziCaptions({
                         startFrom={secondsToFrame(clip.start_time + transInSec, fps)}
                         muted={clip.audio_enabled === 0}
                         volume={clip.audio_volume ?? 1.0}
+                        // ⚠️ CRITICAL: Must be >= 120s to prevent Remotion from triggering forced seeks 
+                        // during minor Tauri/browser buffering micro-stalls (prevents audio stutter).
+                        acceptableTimeShiftInSeconds={120}
                       />
                     </EffectWrapper>
                   </Sequence>
@@ -113,6 +116,8 @@ export function HormoziCaptions({
                   src={clip.previewSrc || clip.file_path}
                   startFrom={secondsToFrame(clip.start_time, fps)}
                   volume={clip.audio_enabled === 0 ? 0 : (clip.audio_volume ?? 1.0)}
+                  // ⚠️ CRITICAL: Prevent forced seeks during micro-stalls (audio stutter fix).
+                  acceptableTimeShiftInSeconds={120}
                 />
               </Sequence>
             );
@@ -326,6 +331,7 @@ const TextClip: React.FC<{
             letterSpacing: `${captionStyle.letterSpacing}px`,
             padding: '0 4px',
             borderRadius: '4px',
+            willChange: 'transform, opacity',
           }}
         >
           {isKaraokeFill ? (
@@ -337,6 +343,7 @@ const TextClip: React.FC<{
                 width: `${fillPct}%`,
                 overflow: 'hidden',
                 whiteSpace: 'nowrap',
+                willChange: 'width',
               }}>{wordObj.word}</span>
             </>
           ) : wordObj.word}
