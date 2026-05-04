@@ -199,8 +199,10 @@ const TextClip: React.FC<{
   }, [clip.caption_style, styleOverrides, clip.id]);
 
   // Apply global offsets on top of the clip’s own position
+  // The global handle defaults to 80, and presets default to 80. 
+  // We treat globalCaptionY as the baseline (relative to 80) to avoid doubling.
   const effectiveX = (captionStyle.x ?? 0) + globalCaptionX;
-  const effectiveY = (captionStyle.y ?? 80) + globalCaptionY;
+  const effectiveY = (captionStyle.y ?? 0) + (globalCaptionY - 80);
 
   const sequenceLocalSeconds = frame / fps;
   const clipLocalStart = clip.start_time ?? 0;

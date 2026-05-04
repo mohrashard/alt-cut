@@ -49,10 +49,11 @@ export function Timeline({
   const [transitions, setTransitions] = useState<Transition[]>([]);
 
   useEffect(() => {
+    if (!projectId) return;
     import('../../lib/db').then(db => {
-      db.getAllTransitions().then(setTransitions);
+      db.getAllTransitions(projectId).then(setTransitions).catch(console.error);
     });
-  }, [clips]);
+  }, [clips, projectId]);
 
   const [trimState, setTrimState] = useState<{
     clipId: number; edge: 'left' | 'right'; startMouseX: number;
@@ -983,7 +984,7 @@ export function Timeline({
                 trackKind="text"
                 clips={textClips}
                 transitions={transitions}
-                onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions().then(setTransitions))}
+                onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions(projectId!).then(setTransitions))}
                 dragClip={dragClip}
                 dragVolume={dragVolume}
                 selectedClipIds={selectedClipIds}
@@ -996,7 +997,7 @@ export function Timeline({
               trackKind="caption"
               clips={[]}
               transitions={transitions}
-              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions().then(setTransitions))}
+              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions(projectId!).then(setTransitions))}
               dragClip={dragClip}
               dragVolume={dragVolume}
               selectedClipIds={selectedClipIds}
@@ -1008,7 +1009,7 @@ export function Timeline({
               trackKind="video"
               clips={videoClips}
               transitions={transitions}
-              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions().then(setTransitions))}
+              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions(projectId!).then(setTransitions))}
               dragClip={dragClip}
               dragVolume={dragVolume}
               selectedClipIds={selectedClipIds}
@@ -1024,7 +1025,7 @@ export function Timeline({
               clips={audioClips}
               shadowClips={videoClips}
               transitions={transitions}
-              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions().then(setTransitions))}
+              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions(projectId!).then(setTransitions))}
               dragClip={dragClip}
               dragVolume={dragVolume}
               selectedClipIds={selectedClipIds}

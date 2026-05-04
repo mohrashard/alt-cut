@@ -80,7 +80,7 @@ body {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background-color: var(--ac-bg-base);
+  background-color: #222;
 }
 
 .layout-topbar {

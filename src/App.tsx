@@ -29,10 +29,10 @@ function App() {
   const [selectedClipIds, setSelectedClipIds] = useState<number[]>([]);
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [highlightAssetId, setHighlightAssetId] = useState<number | null>(null);
-  const [styleOverride, setStyleOverride] = useState<{clipId: number|string; style: any} | null>(null);
+  const [styleOverride, setStyleOverride] = useState<{ clipId: number | string; style: any } | null>(null);
 
   // ── Undo/Redo history (ref-based to avoid re-render on push) ─
-  const historyRef      = useRef<TimelineClip[][]>([]);
+  const historyRef = useRef<TimelineClip[][]>([]);
   const historyIndexRef = useRef<number>(-1);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -81,6 +81,7 @@ function App() {
     if (currentProject) {
       await db.restoreTimelineClips(currentProject.id, prevState);
       setTimelineClips(prevState);
+      setSelectedClipIds([]); // Clear selection on undo
     }
     setCanUndo(historyIndexRef.current > 0);
     setCanRedo(true);
@@ -94,6 +95,7 @@ function App() {
     if (currentProject) {
       await db.restoreTimelineClips(currentProject.id, nextState);
       setTimelineClips(nextState);
+      setSelectedClipIds([]); // Clear selection on redo
     }
     setCanUndo(true);
     setCanRedo(historyIndexRef.current < historyRef.current.length - 1);
@@ -125,11 +127,11 @@ function App() {
   const handleApplyTransition = useCallback(async (transitionType: string) => {
     if (!selectedClip) return;
     const db = await import('./lib/db');
-    
+
     const sameTrackClips = timelineClips.filter(
       c => c.track_type === selectedClip.track_type && c.track_lane === selectedClip.track_lane
     ).sort((a, b) => a.timeline_start - b.timeline_start);
-    
+
     const currentIndex = sameTrackClips.findIndex(c => c.id === selectedClip.id);
     if (currentIndex <= 0) {
       alert("Transitions require a preceding clip on the same track.");
@@ -169,15 +171,19 @@ function App() {
       const db = await import('./lib/db');
       const dur = asset.duration > 0 ? asset.duration : 1.0;
 
-      pushHistory(timelineClips); // snapshot before mutation
-
-      if (over?.id === 'timeline-audio-droppable') {
-        await db.addClipToTimeline(currentProject.id, asset.id, dur, 'audio', 0);
-      } else if (over?.id === 'timeline-droppable') {
-        const trackType = asset.type === 'audio' ? 'audio' : (asset.type === 'text' ? 'text' : 'video');
-        await db.addClipToTimeline(currentProject.id, asset.id, dur, trackType, 0);
+      try {
+        if (over?.id === 'timeline-audio-droppable') {
+          await db.addClipToTimeline(currentProject.id, asset.id, dur, 'audio', 0);
+          pushHistory(timelineClips); // Push history after DB success
+        } else if (over?.id === 'timeline-droppable') {
+          const trackType = asset.type === 'audio' ? 'audio' : (asset.type === 'text' ? 'text' : 'video');
+          await db.addClipToTimeline(currentProject.id, asset.id, dur, trackType, 0);
+          pushHistory(timelineClips); // Push history after DB success
+        }
+        await loadTimeline(currentProject.id);
+      } catch (err) {
+        console.error("Failed to add clip to timeline", err);
       }
-      await loadTimeline(currentProject.id);
     }
   };
 
@@ -189,16 +195,16 @@ function App() {
 
   const handleClearTimeline = useCallback(async () => {
     if (!currentProject) return;
-    if (!confirm('Clear the entire timeline? This cannot be undone.')) return;
+    if (!confirm('Clear the entire timeline?')) return;
+
     const db = await import('./lib/db');
+
+    pushHistory(timelineClips); // Save snapshot before erasing
+
     await db.clearTimelineClips(currentProject.id);
     setTimelineClips([]);
     setSelectedClipIds([]);
-    historyRef.current = [[]];
-    historyIndexRef.current = 0;
-    setCanUndo(false);
-    setCanRedo(false);
-  }, [currentProject]);
+  }, [currentProject, timelineClips, pushHistory]);
 
   const handleExport = async () => {
     if (!(window as any).__TAURI_INTERNALS__) {
@@ -329,7 +335,7 @@ function App() {
             selectedClip={selectedClip}
             onTimelineChange={() => currentProject && loadTimeline(currentProject.id)}
             playheadSeconds={playheadSeconds}
-            onStylePreview={(id, style) => setStyleOverride(id && style ? {clipId: id, style} : null)}
+            onStylePreview={(id, style) => setStyleOverride(id && style ? { clipId: id, style } : null)}
           />
         </div>
 

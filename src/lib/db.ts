@@ -1,13 +1,13 @@
 import Database from '@tauri-apps/plugin-sql';
 
-let dbInstance: Database | null = null;
+let dbPromise: Promise<Database> | null = null;
 const DB_PATH = 'sqlite:altcut.db';
 
 export async function getDb(): Promise<Database> {
-  if (!dbInstance) {
-    dbInstance = await Database.load(DB_PATH);
+  if (!dbPromise) {
+    dbPromise = Database.load(DB_PATH);
   }
-  return dbInstance;
+  return dbPromise;
 }
 
 export interface ClipEffects {

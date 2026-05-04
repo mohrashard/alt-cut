@@ -35,17 +35,14 @@ export function PreviewWindow({
   const [transitions, setTransitions] = useState<Transition[]>([]);
 
   // Track whether the Player is actually mounted so the pause/play effect
-  // can reliably attach its listeners. Remotion doesn't expose an
-  // onMount/onReady prop, so we poll the ref after each render until it
-  // is populated, then flip this flag once.
+  // can reliably attach its listeners. We use a callback ref to avoid
+  // polling and infinite update loops.
   const [playerMounted, setPlayerMounted] = useState(false);
 
-  // Runs after every render until playerRef.current is populated.
-  useEffect(() => {
-    if (playerRef.current && !playerMounted) {
-      setPlayerMounted(true);
-    }
-  });
+  const setPlayerRef = useCallback((node: PlayerRef | null) => {
+    playerRef.current = node;
+    setPlayerMounted(!!node);
+  }, []);
 
   const previewTimecodeRef = useRef<HTMLSpanElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -136,10 +133,16 @@ export function PreviewWindow({
     };
   }, [onPlayheadChange, playerMounted]); // ← playerMounted ensures re-run after Player mounts
 
-  // ── External seek (ruler click / drag): seek the player when paused ──
+  // ── External seek (ruler click / drag): seek the player ──
   useEffect(() => {
     if (!playerRef.current || videoDuration <= 0) return;
+    
+    // CRITICAL: If playing, the Player leads and the State follows (via RAF loop).
+    // If we allow seeking while playing, we create an infinite feedback loop 
+    // where the player advances, the state updates (with slight latency), 
+    // and this effect then tugs the player BACK to the stale state, causing lag.
     if (playerRef.current.isPlaying()) return;
+
     const frame = Math.round(playheadSeconds * 30);
     const current = playerRef.current.getCurrentFrame();
     if (Math.abs(current - frame) > 1) {
@@ -230,11 +233,12 @@ export function PreviewWindow({
     if (p) p.seekTo(Math.max(0, p.getCurrentFrame() - 30));
   };
 
-  // Clamp to playerDuration - 1 (last valid frame index) instead of
-  // playerDuration, which would be one frame past the end.
   const skipForward = () => {
     const p = playerRef.current;
-    if (p) p.seekTo(Math.min(playerDuration - 1, p.getCurrentFrame() + 30));
+    if (p) {
+      const maxFrame = playerDuration - 1;
+      p.seekTo(Math.min(maxFrame, p.getCurrentFrame() + 30));
+    }
   };
 
   return (
@@ -248,7 +252,7 @@ export function PreviewWindow({
             ref={containerRef}
           >
             <Player
-              ref={playerRef}
+              ref={setPlayerRef}
               component={HormoziCaptions as any}
               inputProps={inputProps}
               durationInFrames={playerDuration}
@@ -260,10 +264,7 @@ export function PreviewWindow({
               autoPlay
               loop
               /* Note: Player does not support onError prop directly. Wrap with Error Boundary for handling. */
-              renderLoading={() => {
-                setPlayerMounted(false);
-                return null;
-              }}
+              renderLoading={() => null}
             />
 
             {/* Caption drag handle */}

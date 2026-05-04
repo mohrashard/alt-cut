@@ -77,10 +77,10 @@ async fn run_ai_job(file_path: String, step: String, output_path: String) -> Res
     }
 
     if output.status.success() {
-        // Verify the output file actually exists
-        if !abs_output.exists() {
+        // Verify the output file actually exists and is not empty
+        if !abs_output.exists() || std::fs::metadata(&abs_output).map(|m| m.len()).unwrap_or(0) == 0 {
             return Err(format!(
-                "Python finished OK but output file not found at: {}\nStdout: {}\nStderr: {}",
+                "Python finished OK but output file not found or is empty at: {}\nStdout: {}\nStderr: {}",
                 abs_output_str, stdout, stderr
             ));
         }
@@ -217,8 +217,15 @@ async fn run_render_pipeline(payload_json: String) -> Result<String, String> {
 
     println!("🎬 Starting Remotion Export...");
 
-    let mut remotion = Command::new("cmd");
-    remotion.arg("/C").arg("npx").arg("remotion").arg("render")
+    let mut remotion = if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg("npx");
+        cmd
+    } else {
+        Command::new("npx")
+    };
+    
+    remotion.arg("remotion").arg("render")
         .arg("src/remotion/index.ts").arg("CaptionsComp")
         .arg("final_export.mp4")
         .arg(format!("--props={}", props_path.display()))
@@ -271,27 +278,12 @@ fn install_font(path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn get_system_fonts() -> Result<Vec<String>, String> {
+    // Hardcoded list acting as a fallback instead of misreading C:\Windows\Fonts files.
     let mut fonts = vec![
         "Arial".into(), "Impact".into(), "Montserrat".into(), 
-        "Oswald".into(), "Bebas Neue".into()
+        "Oswald".into(), "Bebas Neue".into(), "Open Sans".into(),
+        "Roboto".into(), "Inter".into()
     ];
-    
-    // Quick Windows scan stub
-    if let Ok(entries) = std::fs::read_dir("C:\\Windows\\Fonts") {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                if ext.eq_ignore_ascii_case("ttf") || ext.eq_ignore_ascii_case("otf") {
-                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        let name = stem.replace("_", " ").replace("-", " ");
-                        if !fonts.contains(&name) {
-                            fonts.push(name);
-                        }
-                    }
-                }
-            }
-        }
-    }
     
     fonts.sort();
     fonts.dedup();
