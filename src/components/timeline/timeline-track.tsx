@@ -152,11 +152,12 @@ interface TimelineTrackContentProps {
 function TransitionBadge({ clipA, clipB, overlapTime, pps, transition, onTransitionChange }: any) {
   const [open, setOpen] = useState(false);
   const leftPx = overlapTime * pps;
-  
+
   const handleSelect = async (type: "ink" | "wipe" | "shutter" | "none") => {
     const db = await import('../../lib/db');
     if (type !== 'none') {
       await db.upsertTransition({
+        project_id: clipA.project_id,
         track_id: clipA.track_index,
         clip_a_id: clipA.id,
         clip_b_id: clipB.id,
@@ -172,7 +173,7 @@ function TransitionBadge({ clipA, clipB, overlapTime, pps, transition, onTransit
 
   return (
     <div style={{ position: 'absolute', left: leftPx, top: '50%', transform: 'translate(-50%, -50%)', zIndex: 15 }}>
-      <button 
+      <button
         style={{ background: transition ? '#8b5cf6' : '#374151', color: 'white', border: '1px solid #4b5563', borderRadius: '4px', fontSize: '10px', padding: '2px 6px', cursor: 'pointer' }}
         onClick={() => setOpen(!open)}
       >
@@ -250,7 +251,7 @@ export function TimelineTrackContent({
     const result: Array<{ clipA: TimelineClip, clipB: TimelineClip, overlapTime: number, transition?: Transition }> = [];
     for (let i = 0; i < sorted.length - 1; i++) {
       const clipA = sorted[i];
-      const clipB = sorted[i+1];
+      const clipB = sorted[i + 1];
       const clipAEnd = clipA.timeline_start + (clipA.end_time - clipA.start_time);
       if (clipAEnd > clipB.timeline_start + 0.05) { // Check for overlap > 0.05s
         const trans = transitions.find(t => t.clip_a_id === clipA.id && t.clip_b_id === clipB.id);
