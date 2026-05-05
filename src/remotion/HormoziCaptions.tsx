@@ -49,6 +49,20 @@ export function HormoziCaptions({
   const audioClips = safeClips.filter(c => c.track_type === 'audio');
   const textClips = safeClips.filter(c => c.track_type === 'text');
 
+  const parsedTextClips = useMemo(() => {
+    return textClips.map(clip => {
+      let chunkData = null;
+      if (clip.file_path?.startsWith('text://')) {
+        try {
+          chunkData = JSON.parse(clip.file_path.substring(7));
+        } catch {
+          chunkData = { text: clip.file_path.substring(7), words: [] };
+        }
+      }
+      return { ...clip, chunkData };
+    });
+  }, [textClips]);
+
   return (
     <AbsoluteFill style={{ backgroundColor: 'black' }}>
       {videoClips.length > 0 ? (
@@ -74,7 +88,7 @@ export function HormoziCaptions({
               const transOutSec = transOut ? transOut.duration_frames / fps : 0;
 
               const soloStartSec = clip.timeline_start + transInSec;
-              const soloDurSec = clipDurSec - transInSec - transOutSec;
+              const soloDurSec = Math.max(0, clipDurSec - transInSec - transOutSec);
               if (soloDurSec > 0) {
                 elements.push(
                   <Sequence key={`vid-solo-${clip.id}`} from={secondsToFrame(soloStartSec, fps)} durationInFrames={Math.max(1, secondsToFrame(soloDurSec, fps))}>
@@ -126,7 +140,7 @@ export function HormoziCaptions({
           {/* Text/Caption tracks */}
           {(() => {
             const lanes = new Map<number, any[]>();
-            textClips.forEach(c => {
+            parsedTextClips.forEach(c => {
               const lane = c.track_lane ?? 0;
               if (!lanes.has(lane)) lanes.set(lane, []);
               lanes.get(lane)!.push(c);
@@ -138,16 +152,7 @@ export function HormoziCaptions({
                   const startFrame = secondsToFrame(clip.timeline_start, fps);
                   const durationFrames = Math.max(1, secondsToFrame(clip.end_time - clip.start_time, fps));
 
-                  let chunkData = null;
-                  if (clip.file_path?.startsWith('text://')) {
-                    try {
-                      chunkData = JSON.parse(clip.file_path.substring(7));
-                    } catch {
-                      chunkData = { text: clip.file_path.substring(7), words: [] };
-                    }
-                  }
-
-                  if (!chunkData) return null;
+                  if (!clip.chunkData) return null;
 
                   return (
                     <Sequence
@@ -157,7 +162,7 @@ export function HormoziCaptions({
                     >
                       <TextClip
                         clip={clip}
-                        chunkData={chunkData}
+                        chunkData={clip.chunkData}
                         fps={fps}
                         globalCaptionX={captionX}
                         globalCaptionY={captionY}
@@ -371,7 +376,7 @@ const TextClip: React.FC<{
           // FIX A: Lock transform to ALWAYS perfectly center on the dashed drag box
           transform: 'translate(-50%, -50%)',
           // FIX B: Match the PreviewWindow bounding box exact width
-          width: '85%',
+           width: 'max-content',
           maxWidth: '85%',
           // FIX C: Force the inner background box to align based on user's textAlign choice
           display: 'flex',

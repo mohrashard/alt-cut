@@ -171,12 +171,10 @@ export const PreviewWindow = memo(function PreviewWindow({
     setPlayerMounted(!!node);
   }, []);
 
-  // ⚠️ CRITICAL: DO NOT REMOVE JSON.stringify HASHES. 
-  // These prevent Remotion player remounting/audio-stutter by ensuring 
-  // inputProps only change when the actual DATA changes, not just object references.
-  const clipsHash = JSON.stringify(clips);
-  const transitionsHash = JSON.stringify(transitions);
-  const styleOverridesHash = JSON.stringify(styleOverrides);
+  // ⚠️ CRITICAL: Use stable, lightweight hashes to prevent Remotion player remounting.
+  const clipsHash = useMemo(() => clips.map(c => `${c.id}-${c.timeline_start}-${c.start_time}-${c.end_time}`).join(','), [clips]);
+  const transitionsHash = useMemo(() => transitions.map(t => `${t.id}-${t.duration_frames}`).join(','), [transitions]);
+  const styleOverridesHash = styleOverrides ? `${styleOverrides.clipId}-${JSON.stringify(styleOverrides.style)}` : 'none';
 
   // 2. Memoize asset URLs based on the hash
   const previewClips = useMemo(() =>
@@ -200,12 +198,15 @@ export const PreviewWindow = memo(function PreviewWindow({
   });
 
   // 3. Stable inputProps — CRITICAL to prevent Remotion audio stuttering
+  const onTimelineChangeRef = useRef(onTimelineChange);
+  useEffect(() => { onTimelineChangeRef.current = onTimelineChange; }, [onTimelineChange]);
+
   const inputProps = useMemo(() => ({
     clips: previewClips,
     transitions,
     captionX: displayX,
     captionY: displayY,
-    onTimelineChange,
+    onTimelineChange: () => onTimelineChangeRef.current?.(),
     styleOverrides
   }), [
     previewClips,
@@ -213,20 +214,17 @@ export const PreviewWindow = memo(function PreviewWindow({
     displayX,
     displayY,
     styleOverridesHash
-    // Notice: we intentionally omit `onTimelineChange` from this array.
-    // If the parent passes an inline function () => {}, it changes every render.
   ]);
 
   const playerDuration = Math.max(1, Math.round(videoDuration * 30));
 
-  // ═══ Conditional RAF Loop (only when player exists) ═══
+  // ═══ Player State Sync ═══
   useEffect(() => {
-    if (!playerMounted || !playerRef.current) return;
     const player = playerRef.current;
-    let raf: number;
+    if (!player) return;
 
-    const loop = () => {
-      const frame = player.getCurrentFrame();
+    const onFrame = (e: CustomEvent<{ frame: number }>) => {
+      const frame = e.detail.frame;
       const sec = frame / 30;
 
       if (engineTimeRef) engineTimeRef.current = sec;
@@ -236,12 +234,10 @@ export const PreviewWindow = memo(function PreviewWindow({
       const text = `${fmtTime(sec)} / ${fmtTime(videoDuration)}`;
       if (timecodeDomRef?.current) timecodeDomRef.current.textContent = text;
       if (previewTimecodeRef.current) previewTimecodeRef.current.textContent = text;
-
-      raf = requestAnimationFrame(loop);
     };
 
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    player.addEventListener('frameupdate', onFrame as any);
+    return () => player.removeEventListener('frameupdate', onFrame as any);
   }, [playerMounted, pps, videoDuration, engineTimeRef, playheadDomRef, timecodeDomRef, fmtTime]);
 
   // ═══ Sync external playhead (FOREVER FIX) ═══
@@ -250,14 +246,15 @@ export const PreviewWindow = memo(function PreviewWindow({
     if (!player || videoDuration <= 0) return;
 
     // ⚠️ CRITICAL: ONLY seek if the parent explicitly passed a newly updated playhead time.
-    // This prevents Remotion's internal buffering pauses from triggering a backwards seek!
-    // Removing lastPlayheadRef check will cause immediate audio stuttering in Tauri.
-    if (lastPlayheadRef.current !== playheadSeconds) {
+    const targetFrame = Math.round(playheadSeconds * 30);
+    const lastFrame = Math.round(lastPlayheadRef.current * 30);
+
+    if (targetFrame !== lastFrame) {
       lastPlayheadRef.current = playheadSeconds;
       
-      const target = Math.round(playheadSeconds * 30);
-      if (Math.abs(player.getCurrentFrame() - target) > 2) {
-        player.seekTo(target);
+      // FIX: Only allow external seeks if the player is NOT playing.
+      if (!player.isPlaying() && Math.abs(player.getCurrentFrame() - targetFrame) > 2) {
+        player.seekTo(targetFrame);
       }
     }
   }, [playheadSeconds, videoDuration]);
@@ -394,7 +391,9 @@ export const PreviewWindow = memo(function PreviewWindow({
               width: 'auto',
               maxWidth: '100%',
               alignSelf: 'center',
+              cursor: 'pointer',
             }}
+            onClick={togglePlay}
           >
             <RemotionErrorBoundary
               key={playerKey}
