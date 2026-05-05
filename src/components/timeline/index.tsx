@@ -24,6 +24,7 @@ export function Timeline({
   markers, projectId, onMarkersChange,
   playheadDomRef, onPpsChange, timecodeDomRef,
   onRevealAsset, engineTimeRef,
+  onAddMedia, onSelectTool,
 }: TimelineProps) {
   const { setNodeRef: setVideoDropRef, isOver: isVideoOver } = useDroppable({ id: 'timeline-droppable' });
   const { setNodeRef: setAudioDropRef, isOver: isAudioOver } = useDroppable({ id: 'timeline-audio-droppable' });
@@ -61,6 +62,12 @@ export function Timeline({
     currentStart: number; currentEnd: number; currentTimelineStart: number;
   } | null>(null);
 
+  const [pendingDrag, setPendingDrag] = useState<{
+    clipIds: number[];
+    startMouseX: number;
+    offsets: Record<number, { origTimelineStart: number; currentTimelineStart: number }>;
+  } | null>(null);
+
   const [dragClip, setDragClip] = useState<{
     clipIds: number[];
     startMouseX: number;
@@ -85,6 +92,7 @@ export function Timeline({
   const [hasPasteContent, setHasPasteContent] = useState(clipboardClips.length > 0);
 
   const tracksRef = useRef<HTMLDivElement>(null);
+  const didDragRef = useRef(false);
   const mouseXRef = useRef(0);
   const isAnyDragging = trimState !== null || dragClip !== null || markerDragRef.current !== null;
 
@@ -277,18 +285,32 @@ export function Timeline({
     e.stopPropagation();
     if (e.shiftKey) return;
     const idsToDrag = selectedClipIds.includes(clip.id) ? selectedClipIds : [clip.id];
-    if (!selectedClipIds.includes(clip.id)) onClipSelected([clip.id]);
     const offsets: Record<number, { origTimelineStart: number; currentTimelineStart: number }> = {};
     for (const id of idsToDrag) {
       const c = clips.find(x => x.id === id);
       if (c) offsets[id] = { origTimelineStart: c.timeline_start, currentTimelineStart: c.timeline_start };
     }
-    setDragClip({ clipIds: idsToDrag, startMouseX: e.clientX, offsets });
+    // Set pending drag first – don't activate dragging (and cursor) until mouse moves
+    setPendingDrag({ clipIds: idsToDrag, startMouseX: e.clientX, offsets });
+    didDragRef.current = false;
   };
 
   const onClipDragging = useCallback(async (e: MouseEvent) => {
+    // 1. If we are in "pending" mode, check if we've moved enough to start a real drag
+    if (pendingDrag && !dragClip) {
+      const deltaPx = Math.abs(e.clientX - pendingDrag.startMouseX);
+      if (deltaPx > 3) {
+        setDragClip(pendingDrag);
+        setPendingDrag(null);
+        didDragRef.current = true;
+      }
+      return;
+    }
+
+    // 2. If dragging is active, perform the move
     if (!dragClip) return;
     const deltaPx = e.clientX - dragClip.startMouseX;
+
     let deltaSec = deltaPx / pps;
     let minOrig = Infinity;
     for (const id of dragClip.clipIds) {
@@ -309,21 +331,30 @@ export function Timeline({
       }
       return { ...prev, offsets: newOffsets };
     });
-  }, [dragClip, pps, snapSeconds]);
+  }, [dragClip, pendingDrag, pps, snapSeconds]);
 
   const onClipDragEnd = useCallback(async (_e: MouseEvent) => {
-    if (!dragClip) return;
-    onBeforeChange();
-    const db = await import('../../lib/db');
-    for (const id of dragClip.clipIds) {
-      const snapped = dragClip.offsets[id].currentTimelineStart;
-      const clip = clips.find(c => c.id === id);
-      if (clip) await db.updateClipTime(clip.id, clip.start_time, clip.end_time, snapped);
+    if (!dragClip && !pendingDrag) return;
+
+    if (dragClip) {
+      // UI FEEDBACK: Immediately clear drag state so clip doesn't "stick" to cursor
+      const finalOffsets = { ...dragClip.offsets };
+      const finalIds = [...dragClip.clipIds];
+      setDragClip(null);
+      setSnapPoint(null);
+
+      onBeforeChange();
+      const db = await import('../../lib/db');
+      for (const id of finalIds) {
+        const snapped = finalOffsets[id].currentTimelineStart;
+        const clip = clips.find(c => c.id === id);
+        if (clip) await db.updateClipTime(clip.id, clip.start_time, clip.end_time, snapped);
+      }
+      onTimelineChange();
     }
-    setDragClip(null);
-    setSnapPoint(null);
-    onTimelineChange();
-  }, [dragClip, clips, onTimelineChange, onBeforeChange]);
+
+    setPendingDrag(null);
+  }, [dragClip, pendingDrag, clips, onTimelineChange, onBeforeChange]);
 
   useEffect(() => {
     if (trimState) {
@@ -337,7 +368,7 @@ export function Timeline({
   }, [trimState, onTrimDrag, onTrimRelease]);
 
   useEffect(() => {
-    if (dragClip) {
+    if (dragClip || pendingDrag) {
       document.addEventListener('mousemove', onClipDragging);
       document.addEventListener('mouseup', onClipDragEnd);
       return () => {
@@ -345,7 +376,7 @@ export function Timeline({
         document.removeEventListener('mouseup', onClipDragEnd);
       };
     }
-  }, [dragClip, onClipDragging, onClipDragEnd]);
+  }, [dragClip, pendingDrag, onClipDragging, onClipDragEnd]);
 
   // ── Marker Dragging — ref-based, zero re-renders (same pattern as playhead) ──
   const onMarkerMouseDown = (e: React.MouseEvent, marker: typeof markers[0]) => {
@@ -422,18 +453,43 @@ export function Timeline({
 
   // ── Split ─────────────────────────────────────────────────────
   const handleSplit = async () => {
-    if (selectedClipIds.length === 0) return;
+    // 1. Determine which clips to split
+    let idsToSplit = selectedClipIds;
+    if (idsToSplit.length === 0) {
+      // Auto-select clips under playhead if nothing is selected
+      idsToSplit = clips
+        .filter(c => playheadSeconds > c.timeline_start && playheadSeconds < c.timeline_start + (c.end_time - c.start_time))
+        .map(c => c.id);
+    }
+
+    if (idsToSplit.length === 0) return;
+
     onBeforeChange();
     const db = await import('../../lib/db');
-    for (const id of selectedClipIds) {
+    const newIds: number[] = [];
+
+    for (const id of idsToSplit) {
       const clip = clips.find(c => c.id === id);
       if (!clip) continue;
       const localT = playheadSeconds - clip.timeline_start;
-      if (localT > 0 && localT < (clip.end_time - clip.start_time)) {
-        await db.splitClip(id, playheadSeconds);
+      const dur = clip.end_time - clip.start_time;
+
+      if (localT > 0.05 && localT < dur - 0.05) {
+        const result = await db.splitClip(id, playheadSeconds);
+        // splitClip returns the ID of the newly created right-hand clip
+        if (typeof result === 'number') newIds.push(result);
       }
     }
-    onClipSelected([]);
+
+    if (newIds.length > 0) {
+      // CapCut style: select the newly created right-hand clips
+      onClipSelected(newIds);
+    } else if (selectedClipIds.length > 0) {
+      // If we didn't split anything (e.g. playhead at edges), keep original selection
+    } else {
+      onClipSelected([]);
+    }
+
     onTimelineChange();
   };
 
@@ -526,7 +582,7 @@ export function Timeline({
     }
 
     // Grab the time directly from the source of truth (the Ref), not the React State.
-    const realTimePlayhead = engineTimeRef?.current ?? playheadSeconds; 
+    const realTimePlayhead = engineTimeRef?.current ?? playheadSeconds;
 
     if (
       typeof realTimePlayhead !== 'number' ||
@@ -539,14 +595,14 @@ export function Timeline({
 
     try {
       const db = await import('../../lib/db');
-      
+
       // Optimistic UI Update (CapCut style): 
       // If you want it to feel instantaneous, trigger a local state update for the UI right here
       // before waiting for the database to finish saving.
-      
+
       // Save to database
       await db.addMarker(projectId, realTimePlayhead);
-      
+
       // Refresh your UI state
       onMarkersChange();
     } catch (err) {
@@ -839,11 +895,30 @@ export function Timeline({
   const { ticks } = getRulerTicks(pps, totalDur);
   const playheadX = playheadSeconds * pps;
   const selectedClips = clips.filter(c => selectedClipIds.includes(c.id));
-  const canDeleteL = selectedClips.some(c =>
-    playheadSeconds > c.timeline_start &&
-    playheadSeconds < c.timeline_start + (c.end_time - c.start_time)
-  );
-  const canSplit = canDeleteL;
+
+  // canDeleteL/R/Split now check either the selection OR the playhead position
+  const canSplit = useMemo(() => {
+    const targets = selectedClipIds.length > 0 ? selectedClips : clips;
+    return targets.some(c => {
+      const dur = c.end_time - c.start_time;
+      return playheadSeconds > c.timeline_start + 0.05 &&
+        playheadSeconds < c.timeline_start + dur - 0.05;
+    });
+  }, [selectedClipIds, selectedClips, clips, playheadSeconds]);
+
+  const canDeleteL = useMemo(() => {
+    return selectedClips.some(c =>
+      playheadSeconds > c.timeline_start + 0.05 &&
+      playheadSeconds < c.timeline_start + (c.end_time - c.start_time)
+    );
+  }, [selectedClips, playheadSeconds]);
+
+  const canDeleteR = useMemo(() => {
+    return selectedClips.some(c =>
+      playheadSeconds > c.timeline_start &&
+      playheadSeconds < c.timeline_start + (c.end_time - c.start_time) - 0.05
+    );
+  }, [selectedClips, playheadSeconds]);
 
   const handleClipClick = (e: React.MouseEvent, clipId: number) => {
     e.stopPropagation();
@@ -910,6 +985,10 @@ export function Timeline({
         onZoomOut={() => handleZoom(p => p * 0.75)}
         onZoomIn={() => handleZoom(p => p * 1.33)}
         onZoomSlider={(v) => handleZoom(v)}
+        onAddMedia={onAddMedia}
+        onSelectTool={onSelectTool}
+        canDeleteL={canDeleteL}
+        canDeleteR={canDeleteR}
       />
 
       {/* ── Timeline body ────────────────────────────────── */}
@@ -983,33 +1062,32 @@ export function Timeline({
               <TimelineTrackContent
                 trackKind="text"
                 clips={textClips}
-                transitions={transitions}
-                onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions(projectId!).then(setTransitions))}
+
                 dragClip={dragClip}
                 dragVolume={dragVolume}
                 selectedClipIds={selectedClipIds}
                 pps={pps}
                 onEmptyTrackClick={handleEmptyTrackClick}
                 elementProps={elementProps}
+                trimState={trimState}
               />
             )}
             <TimelineTrackContent
               trackKind="caption"
               clips={[]}
-              transitions={transitions}
-              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions(projectId!).then(setTransitions))}
+
               dragClip={dragClip}
               dragVolume={dragVolume}
               selectedClipIds={selectedClipIds}
               pps={pps}
               onEmptyTrackClick={handleEmptyTrackClick}
               elementProps={elementProps}
+              trimState={trimState}
             />
             <TimelineTrackContent
               trackKind="video"
               clips={videoClips}
-              transitions={transitions}
-              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions(projectId!).then(setTransitions))}
+
               dragClip={dragClip}
               dragVolume={dragVolume}
               selectedClipIds={selectedClipIds}
@@ -1019,13 +1097,13 @@ export function Timeline({
               isOver={isVideoOver}
               emptyHint={<><span>📦</span><span>Drag video here to start</span></>}
               elementProps={elementProps}
+              trimState={trimState}
             />
             <TimelineTrackContent
               trackKind="audio"
               clips={audioClips}
               shadowClips={videoClips}
-              transitions={transitions}
-              onTransitionChange={() => import('../../lib/db').then(db => db.getAllTransitions(projectId!).then(setTransitions))}
+
               dragClip={dragClip}
               dragVolume={dragVolume}
               selectedClipIds={selectedClipIds}
@@ -1035,6 +1113,7 @@ export function Timeline({
               isOver={isAudioOver}
               emptyHint={<><span>🎵</span><span>Drag audio here</span></>}
               elementProps={elementProps}
+              trimState={trimState}
             />
 
           </div>

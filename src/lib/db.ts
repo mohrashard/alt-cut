@@ -573,7 +573,7 @@ export async function setAudioVolume(clipId: number, volume: number): Promise<vo
 export async function splitClip(
   clipId: number,
   splitAtSeconds: number
-): Promise<void> {
+): Promise<number> {
   const db = await getDb();
 
   const rows = await db.select<TimelineClip[]>(
@@ -603,7 +603,7 @@ export async function splitClip(
     );
 
     // Insert Part B immediately after Part A
-    await db_raw.execute(
+    const { lastInsertId } = await db_raw.execute(
       `INSERT INTO timeline_clips
          (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
@@ -622,6 +622,8 @@ export async function splitClip(
       ]
     );
     await db_raw.execute('COMMIT');
+    if (lastInsertId === undefined) throw new Error('Split failed: lastInsertId is undefined');
+    return lastInsertId;
   } catch (err) {
     await db_raw.execute('ROLLBACK');
     throw err;

@@ -313,6 +313,53 @@ export default function App() {
       setIsRendering(false);
     }
   }, [timelineClips, transitions, features, videoDuration]);
+  
+  const handleGlobalImport = useCallback(async () => {
+    if (!project?.id) return;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const { invoke, convertFileSrc } = await import('@tauri-apps/api/core');
+      const db = await import('./lib/db');
+
+      const file = await open({
+        multiple: false,
+        filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'avi', 'mp3', 'wav', 'png', 'jpg'] }],
+      });
+      const filePath = typeof file === 'string' ? file : (file as any)?.path ?? (Array.isArray(file) ? file[0] : null);
+      if (!filePath) return;
+
+      let duration = 0;
+      try {
+        duration = await Promise.race([
+          invoke<any>('get_video_duration', { videoPath: filePath }).then(r => parseFloat(r)),
+          new Promise<number>((_, reject) => setTimeout(() => reject('timeout'), 1500))
+        ]).catch(() => 0);
+      } catch { }
+
+      if (isNaN(duration) || duration <= 0) {
+        try {
+          duration = await new Promise<number>(res => {
+            const v = document.createElement('video');
+            v.preload = 'metadata';
+            v.onloadedmetadata = () => res(v.duration);
+            v.onerror = () => res(0);
+            v.src = convertFileSrc(filePath);
+          });
+        } catch { }
+      }
+      if (isNaN(duration) || duration <= 0) duration = 5.0;
+
+      const ext = filePath.split('.').pop()?.toLowerCase() || '';
+      const isAudio = ['mp3', 'wav', 'aac', 'm4a'].includes(ext);
+      const isImage = ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext);
+      const assetType = isAudio ? 'audio' : isImage ? 'image' : 'video';
+
+      const asset = await db.addAsset(project.id, filePath, assetType, duration);
+      await handleAddClip(asset, isAudio ? 'audio' : 'video');
+    } catch (e) {
+      console.error('Global import failed:', e);
+    }
+  }, [project?.id, handleAddClip]);
 
   // ─── Global Keyboard Shortcuts ─────────────────────────────
   useEffect(() => {
@@ -406,6 +453,7 @@ export default function App() {
             timecodeDomRef={timecodeDomRef}
             onRevealAsset={setHighlightAssetId}
             engineTimeRef={engineTimeRef}
+            onAddMedia={handleGlobalImport}
           />
         </div>
 

@@ -21,10 +21,7 @@ interface TrimState {
   currentTimelineStart: number;
 }
 
-interface DragClipState {
-  clipId: number;
-  currentTimelineStart: number;
-}
+import { type DragClipState } from './constants';
 
 interface TimelineElementProps {
   clip: TimelineClip;
@@ -215,8 +212,8 @@ export function TimelineElement({
   if (trimState?.clipId === clip.id) {
     dur = trimState.currentEnd - trimState.currentStart;
     tStart = trimState.currentTimelineStart;
-  } else if (dragClip?.clipId === clip.id) {
-    tStart = dragClip.currentTimelineStart;
+  } else if (dragClip?.offsets[clip.id]) {
+    tStart = dragClip.offsets[clip.id].currentTimelineStart;
   }
 
   const leftPx = tStart * pps;
@@ -230,7 +227,7 @@ export function TimelineElement({
       (v) => v != null && typeof v === 'object' && 'status' in v && v.status === 'processing',
     );
 
-  const isDragging = dragClip?.clipId === clip.id;
+  const isDragging = !!dragClip?.offsets[clip.id];
   const isMuted = clip.audio_enabled === 0;
   const label = clip.file_path?.split(/[/\\]/).pop() ?? '';
 
@@ -256,6 +253,7 @@ export function TimelineElement({
       onClick={(e) => { e.stopPropagation(); onClipSelected(e, clip.id); }}
       onDoubleClick={(e) => { e.stopPropagation(); onClipOptionsClick(e, clip.id); }}
       onMouseDown={(e) => { if (e.button === 0) onClipDragStart(e, clip); }}
+      onMouseUp={(e) => { e.stopPropagation(); }}
       onContextMenu={(e) => onClipOptionsClick(e, clip.id)}
       title={`${label}\n${fmt(tStart)} → ${fmt(tStart + dur)}`}
     >

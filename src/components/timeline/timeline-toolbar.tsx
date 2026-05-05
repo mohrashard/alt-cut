@@ -36,6 +36,10 @@ interface TimelineToolbarProps {
   onZoomOut: () => void;
   onZoomIn: () => void;
   onZoomSlider: (value: number) => void;
+  onAddMedia?: () => void;
+  onSelectTool?: () => void;
+  canDeleteL?: boolean;
+  canDeleteR?: boolean;
 }
 
 export function TimelineToolbar({
@@ -45,6 +49,7 @@ export function TimelineToolbar({
   onUndo, onRedo, onSplit, onDeleteLeft, onDeleteRight, onDelete,
   onAddMarker, onToggleMagnet, onToggleRippleEditing, onDuplicate,
   onToggleAudio, onZoomFit, onZoomOut, onZoomIn, onZoomSlider, onClearMarkers,
+  onAddMedia, onSelectTool, canDeleteL, canDeleteR,
 }: TimelineToolbarProps) {
   const isRippleOn = !!rippleEditingOn;
   const hasSelection = selectedClipIds.length > 0;
@@ -252,10 +257,10 @@ export function TimelineToolbar({
 
         {/* ── Left group: Add + Select ── */}
         <div className="tl-group">
-          <button className="tl-b tl-b-add" title="Add media">
+          <button className="tl-b tl-b-add" title="Add media" onClick={onAddMedia}>
             <AddIcon />
           </button>
-          <button className="tl-b tl-b-select" title="Selection tool (V)">
+          <button className="tl-b tl-b-select" title="Selection tool (V)" onClick={onSelectTool}>
             <SelectIcon />
           </button>
         </div>
@@ -311,7 +316,7 @@ export function TimelineToolbar({
           <button
             className="tl-b"
             title="Delete left of playhead (Q)"
-            disabled={!hasSelection}
+            disabled={!canDeleteL}
             onClick={onDeleteLeft}
           >
             <DeleteLeftIcon />
@@ -319,7 +324,7 @@ export function TimelineToolbar({
           <button
             className="tl-b"
             title="Delete right of playhead (W)"
-            disabled={!hasSelection}
+            disabled={!canDeleteR}
             onClick={onDeleteRight}
           >
             <DeleteRightIcon />

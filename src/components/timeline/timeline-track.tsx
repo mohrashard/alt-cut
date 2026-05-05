@@ -1,7 +1,7 @@
-import { useRef, useCallback, useState, useMemo } from 'react';
+import { useRef, useCallback } from 'react';
 import { RULER_HEIGHT, TRACK_VIDEO_H, TRACK_AUDIO_H, TRACK_TEXT_H } from './constants';
 import type { TrackState } from './constants';
-import type { TimelineClip, Transition } from '../../lib/db';
+import type { TimelineClip } from '../../lib/db';
 import { TimelineElement, AudioShadowElement } from './timeline-element';
 
 // ─── Z-index layer tokens ────────────────────────────────────────────────────
@@ -93,10 +93,7 @@ export function TimelineTrackLabels({
 
 type TrackKind = 'video' | 'audio' | 'text' | 'caption';
 
-interface DragClipState {
-  clipIds: number[];
-  offsets: Record<number, { origTimelineStart: number; currentTimelineStart: number }>;
-}
+import { type DragClipState } from './constants';
 
 interface DragVolumeState {
   clipIds: number[];
@@ -132,6 +129,7 @@ interface TimelineTrackContentProps {
   /** Current drag/volume overlay states */
   dragClip: DragClipState | null;
   dragVolume: DragVolumeState | null;
+  trimState: TrimState | null;
   selectedClipIds: number[];
   /** Pixels per second zoom level */
   pps: number;
@@ -145,52 +143,6 @@ interface TimelineTrackContentProps {
   emptyHint?: React.ReactNode;
   /** Shared element interaction callbacks */
   elementProps: TimelineElementSharedProps;
-  transitions?: Transition[];
-  onTransitionChange?: () => void;
-}
-
-function TransitionBadge({ clipA, clipB, overlapTime, pps, transition, onTransitionChange }: any) {
-  const [open, setOpen] = useState(false);
-  const leftPx = overlapTime * pps;
-
-  const handleSelect = async (type: "ink" | "wipe" | "shutter" | "none") => {
-    const db = await import('../../lib/db');
-    if (type !== 'none') {
-      await db.upsertTransition({
-        project_id: clipA.project_id,
-        track_id: clipA.track_index,
-        clip_a_id: clipA.id,
-        clip_b_id: clipB.id,
-        type,
-        duration_frames: 30,
-      });
-    } else {
-      await db.deleteTransition(clipA.id, clipB.id);
-    }
-    onTransitionChange?.();
-    setOpen(false);
-  };
-
-  return (
-    <div style={{ position: 'absolute', left: leftPx, top: '50%', transform: 'translate(-50%, -50%)', zIndex: 15 }}>
-      <button
-        style={{ background: transition ? '#8b5cf6' : '#374151', color: 'white', border: '1px solid #4b5563', borderRadius: '4px', fontSize: '10px', padding: '2px 6px', cursor: 'pointer' }}
-        onClick={() => setOpen(!open)}
-      >
-        {transition ? transition.type : 'None'}
-      </button>
-      {open && (
-        <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', background: '#1f2937', border: '1px solid #374151', borderRadius: '4px', padding: '4px', display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px', zIndex: 50 }}>
-          <button style={{ background: 'transparent', color: 'white', border: 'none', fontSize: '10px', cursor: 'pointer' }} onClick={() => handleSelect('ink')}>Ink</button>
-          <button style={{ background: 'transparent', color: 'white', border: 'none', fontSize: '10px', cursor: 'pointer' }} onClick={() => handleSelect('wipe')}>Wipe</button>
-          <button style={{ background: 'transparent', color: 'white', border: 'none', fontSize: '10px', cursor: 'pointer' }} onClick={() => handleSelect('shutter')}>Shutter</button>
-          {transition && (
-            <button style={{ background: 'transparent', color: '#ef4444', border: 'none', fontSize: '10px', cursor: 'pointer', marginTop: '4px' }} onClick={() => handleSelect('none')}>Remove</button>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 export function TimelineTrackContent({
@@ -206,8 +158,7 @@ export function TimelineTrackContent({
   isOver = false,
   emptyHint,
   elementProps,
-  transitions = [],
-  onTransitionChange,
+  trimState,
 }: TimelineTrackContentProps) {
   // Whether a mousedown on the track button was immediately followed by a clip
   // drag — in that case we skip the deselect-on-mouseup.
@@ -227,44 +178,28 @@ export function TimelineTrackContent({
   }, [dragVolume]);
 
   const renderClip = useCallback((clip: TimelineClip) => {
-    const isDragging = dragClip?.clipIds.includes(clip.id) ?? false;
-    const mappedDragClip = isDragging && dragClip
-      ? { clipId: clip.id, currentTimelineStart: dragClip.offsets[clip.id].currentTimelineStart }
-      : null;
-
     const finalClip = resolveClip(clip);
 
     return (
       <TimelineElement
         key={finalClip.id}
         clip={finalClip}
-        trackType={(finalClip.track_type as 'video' | 'audio' | 'text') ?? 'video'}
+        trackType={trackKind === 'caption' ? 'text' : trackKind}
+        pps={pps}
         isSelected={selectedClipIds.includes(finalClip.id)}
-        dragClip={mappedDragClip}
-        {...elementProps}
+        dragClip={dragClip}
+        trimState={trimState?.clipId === finalClip.id ? trimState : null}
+        onClipSelected={elementProps.onClipSelected}
+        onClipDragStart={elementProps.onClipDragStart}
+        onClipOptionsClick={elementProps.onClipOptionsClick}
+        onTrimMouseDown={elementProps.onTrimMouseDown}
+        onVolumeChange={elementProps.onVolumeChange}
+        onVolumeDragEnd={elementProps.onVolumeDragEnd}
       />
     );
-  }, [dragClip, resolveClip, selectedClipIds, elementProps]);
+  }, [dragClip, selectedClipIds, pps, trackKind, elementProps, trimState, resolveClip]);
 
-  const overlaps = useMemo(() => {
-    const sorted = [...clips].sort((a, b) => a.timeline_start - b.timeline_start);
-    const result: Array<{ clipA: TimelineClip, clipB: TimelineClip, overlapTime: number, transition?: Transition }> = [];
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const clipA = sorted[i];
-      const clipB = sorted[i + 1];
-      const clipAEnd = clipA.timeline_start + (clipA.end_time - clipA.start_time);
-      if (clipAEnd > clipB.timeline_start + 0.05) { // Check for overlap > 0.05s
-        const trans = transitions.find(t => t.clip_a_id === clipA.id && t.clip_b_id === clipB.id);
-        result.push({
-          clipA,
-          clipB,
-          overlapTime: clipB.timeline_start,
-          transition: trans,
-        });
-      }
-    }
-    return result;
-  }, [clips, transitions]);
+  // Transitions disabled per user request
 
   return (
     <div
@@ -322,18 +257,8 @@ export function TimelineTrackContent({
         {/* Main clips */}
         {clips.map(renderClip)}
 
-        {/* Transition Badges for Overlaps */}
-        {overlaps.map(ov => (
-          <TransitionBadge
-            key={`trans-${ov.clipA.id}-${ov.clipB.id}`}
-            clipA={ov.clipA}
-            clipB={ov.clipB}
-            overlapTime={ov.overlapTime}
-            pps={pps}
-            transition={ov.transition}
-            onTransitionChange={onTransitionChange}
-          />
-        ))}
+        {/* Transitions disabled per user request */}
+        {/* {trackKind === 'video' && overlaps.map(ov => ( ... ))} */}
 
         {/* Audio shadow ghosts (video-embedded audio displayed in the audio row) */}
         {shadowClips?.map(clip => {

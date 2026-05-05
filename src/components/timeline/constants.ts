@@ -10,6 +10,11 @@ export const TRACK_AUDIO_H     = 40;
 export const TRACK_TEXT_H      = 34;
 export const SNAP_THRESHOLD_PX = 10;        // px within which snapping activates
 
+export interface DragClipState {
+  clipIds: number[];
+  offsets: Record<number, { origTimelineStart: number; currentTimelineStart: number }>;
+}
+
 // ─── Types ────────────────────────────────────────────────────
 export interface TrackState { locked: boolean; hidden: boolean; muted: boolean; }
 
@@ -41,4 +46,6 @@ export interface TimelineProps {
   onReplaceAsset?: (clipId: number) => void;
   // Raw engine time tracker
   engineTimeRef?: React.MutableRefObject<number>;
+  onAddMedia?: () => void;
+  onSelectTool?: () => void;
 }
