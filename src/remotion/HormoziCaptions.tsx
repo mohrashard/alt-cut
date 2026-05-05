@@ -48,7 +48,8 @@ export function HormoziCaptions({
   const videoClips = safeClips.filter(c => !c.track_type || c.track_type === 'video');
   const audioClips = safeClips.filter(c => c.track_type === 'audio');
   const textClips = safeClips.filter(c => c.track_type === 'text');
-  const textClipsKey = textClips.map(c => `${c.id}-${c.file_path}`).join(',');
+  // BUG FIX: Include caption_style in the key so style changes trigger a re-memoization
+  const textClipsKey = textClips.map(c => `${c.id}-${c.file_path}-${c.caption_style || ''}`).join(',');
 
   const parsedTextClips = useMemo(() => {
     return textClips.map(clip => {

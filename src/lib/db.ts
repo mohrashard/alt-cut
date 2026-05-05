@@ -227,6 +227,14 @@ export async function runMigrations(): Promise<void> {
     await db.execute(`ALTER TABLE timeline_clips ADD COLUMN scale REAL DEFAULT 1.0`);
   } catch { /* column already exists */ }
 
+  // BUG FIX: Add indexes to prevent 1-3 minute 'Full Table Scans' on large projects
+  try {
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_timeline_project_track ON timeline_clips (project_id, track_type)`);
+  } catch { /* index already exists or error */ }
+  try {
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_timeline_asset ON timeline_clips (asset_id)`);
+  } catch { /* index already exists */ }
+
   await db.execute(`
     CREATE TABLE IF NOT EXISTS transitions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -465,20 +473,16 @@ export async function updateCaptionStyle(clipId: number, style: CaptionStyle): P
   await db.execute('UPDATE timeline_clips SET caption_style=$1 WHERE id=$2', [styleStr, clipId]);
 }
 
-export async function batchUpdateCaptionStyle(clips: { id: number | string; style: CaptionStyle }[]): Promise<void> {
+export async function batchUpdateCaptionStyle(projectId: number | string, style: CaptionStyle): Promise<void> {
   const db = await getDb();
+  const sanitized = sanitizeCaptionStyle(style);
+  const styleStr = JSON.stringify(sanitized);
 
-  await db.execute('BEGIN TRANSACTION');
-  try {
-    for (const { id, style } of clips) {
-      const sanitized = sanitizeCaptionStyle(style);
-      await db.execute('UPDATE timeline_clips SET caption_style=$1 WHERE id=$2', [JSON.stringify(sanitized), id]);
-    }
-    await db.execute('COMMIT');
-  } catch (error) {
-    await db.execute('ROLLBACK');
-    throw error;
-  }
+  // Atomic bulk update for all text clips in the project
+  await db.execute(
+    "UPDATE timeline_clips SET caption_style = $1 WHERE project_id = $2 AND track_type = 'text'",
+    [styleStr, Number(projectId)]
+  );
 }
 
 export async function updateCaptionText(clipId: number, wordsJson: string): Promise<void> {

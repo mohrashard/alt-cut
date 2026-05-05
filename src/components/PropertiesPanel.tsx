@@ -190,18 +190,21 @@ export function PropertiesPanel({
     isApplyingRef.current = true;
 
     try {
-      const allClips = await db.getTimelineClips(selectedClip.project_id);
-      const textClips = allClips.filter(c => c.track_type === 'text');
+      // Atomic project-wide update with ID safety
+      await db.batchUpdateCaptionStyle(Number(selectedClip.project_id), localCaptionStyle);
 
-      // BUG 4 FIX: Serialize writes to prevent SQLite write contention
-      await db.batchUpdateCaptionStyle(textClips.map(c => ({ id: c.id, style: localCaptionStyle })));
-
-      onSilentRefresh?.();
+      // CRITICAL: Await the refresh so the 'isApplying' state covers the whole lifecycle
+      if (onSilentRefresh) {
+        await onSilentRefresh();
+      }
     } catch (err) {
       console.error('Failed to apply style to all clips:', err);
     } finally {
-      setIsApplying(false);
-      isApplyingRef.current = false;
+      // Small delay to ensure React has flushed the state updates
+      setTimeout(() => {
+        setIsApplying(false);
+        isApplyingRef.current = false;
+      }, 100);
     }
   };
 
