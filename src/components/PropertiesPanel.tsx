@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, useReducer } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { TimelineClip, CaptionStyle } from '../lib/db';
 import * as db from '../lib/db';
@@ -7,8 +7,8 @@ import { CaptionStyleEditor } from './CaptionStyleEditor';
 
 export interface AppFeatures {
   fontFamily: string;
-  captionX: number; // Percentage offset from center (0 = center)
-  captionY: number; // Percentage from top (0-100)
+  captionX: number;
+  captionY: number;
 }
 
 // Shape returned by the Rust run_ai_job command
@@ -19,8 +19,11 @@ interface AiJobResult {
 
 interface PropertiesProps {
   selectedClip: TimelineClip | null;
-  onFeaturesChange: (f: AppFeatures) => void;
+  onFeaturesChange?: (f: AppFeatures) => void;
   onTimelineChange: () => void;
+  onSilentRefresh?: () => void;
+  onBeforeChange?: () => void;
+  onLiveClipUpdate?: (clipId: number, patch: Partial<TimelineClip>) => void;
   playheadSeconds: number;
   onStylePreview?: (clipId: number | string | null, style: CaptionStyle | null) => void;
 }
@@ -30,8 +33,8 @@ function StatusBadge({ status }: { status?: string }) {
   if (!status || status === 'queued') return null;
   const map: Record<string, { label: string; color: string }> = {
     processing: { label: '⚙️ Processing…', color: '#f59e0b' },
-    completed:  { label: '✅ Done',          color: '#10b981' },
-    failed:     { label: '❌ Failed',         color: '#ef4444' },
+    completed: { label: '✅ Done', color: '#10b981' },
+    failed: { label: '❌ Failed', color: '#ef4444' },
   };
   const s = map[status];
   if (!s) return null;
@@ -42,8 +45,8 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
-export function PropertiesPanel({ 
-  selectedClip, onFeaturesChange, onTimelineChange, playheadSeconds, onStylePreview 
+export function PropertiesPanel({
+  selectedClip, onFeaturesChange, onTimelineChange, onSilentRefresh, onBeforeChange, onLiveClipUpdate, playheadSeconds, onStylePreview
 }: PropertiesProps) {
   const [features] = useState<AppFeatures>({
     fontFamily: 'Arial',
@@ -53,21 +56,55 @@ export function PropertiesPanel({
   const [log, setLog] = useState<string>('');
   const [clipScale, setClipScale] = useState<number>(100);
   const [localVolume, setLocalVolume] = useState<number>(1.0);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'pending' | 'saved' | 'error'>('idle');
+  const [pendingApplyAll, setPendingApplyAll] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [textClipCount, setTextClipCount] = useState(0);
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualText, setManualText] = useState('');
+  const [invalidWordIdx, setInvalidWordIdx] = useState<number | null>(null);
   const volumeDebounceRef = useRef<number | null>(null);
   const scaleDebounceRef = useRef<number | null>(null);
   const textSaveDebounceRef = useRef<number | null>(null);
   const lastTextRef = useRef<string>('');
+  const filePathRef = useRef<string | undefined>(selectedClip?.file_path);
+  const isApplyingRef = useRef(false);
+  const latestClipIdRef = useRef<number | string | undefined>(selectedClip?.id);
 
-  useEffect(() => { onFeaturesChange(features); }, [features, onFeaturesChange]);
+  useEffect(() => {
+    filePathRef.current = selectedClip?.file_path;
+  }, [selectedClip?.file_path]);
+
+  useEffect(() => {
+    latestClipIdRef.current = selectedClip?.id;
+  }, [selectedClip?.id]);
+
+  useEffect(() => {
+    if (onFeaturesChange) onFeaturesChange(features);
+  }, [features, onFeaturesChange]);
+
+  // ── Cleanup Debounce Timers ────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (volumeDebounceRef.current) window.clearTimeout(volumeDebounceRef.current);
+      if (scaleDebounceRef.current) window.clearTimeout(scaleDebounceRef.current);
+      if (textSaveDebounceRef.current) window.clearTimeout(textSaveDebounceRef.current);
+      if (debounceTimerRef.current) window.clearTimeout(debounceTimerRef.current);
+      if (wordsDebounceTimerRef.current) window.clearTimeout(wordsDebounceTimerRef.current);
+    };
+  }, []);
 
   // Reset log when clip changes
   useEffect(() => {
     setLog('');
     setClipScale((selectedClip?.scale ?? 1.0) * 100);
     setLocalVolume(selectedClip?.audio_volume ?? 1.0);
+
+    // UX 3 FIX: Prevent previous saveStatus dot from bleeding onto a new clip unmount
+    return () => {
+      setSaveStatus('idle');
+    };
   }, [selectedClip?.id]);
-
-
 
   // ── Caption Style State ────────────────────────────────────
   const clipCaptionStyleRaw = selectedClip?.caption_style;
@@ -78,14 +115,19 @@ export function PropertiesPanel({
 
   const [localCaptionStyle, setLocalCaptionStyle] = useState<CaptionStyle>(parsedCaptionStyle);
 
-  // Sync when clip changes
+  // Sync when clip changes OR when caption_style data changes (e.g. after Apply to All)
   const prevClipIdRef = useRef<number | string | undefined>(undefined);
   useEffect(() => {
-    if (selectedClip?.id !== prevClipIdRef.current) {
-      setLocalCaptionStyle(parsedCaptionStyle);
+    // Do not overwrite local style if we are mid-flight in an Apply operation
+    if (isApplyingRef.current) return;
+
+    const idChanged = selectedClip?.id !== prevClipIdRef.current;
+    if (idChanged) {
       prevClipIdRef.current = selectedClip?.id;
       if (onStylePreview) onStylePreview(null, null);
     }
+    // Always sync style when parsedCaptionStyle changes (covers Apply to All refreshing the same clip)
+    setLocalCaptionStyle(parsedCaptionStyle);
   }, [parsedCaptionStyle, selectedClip?.id, onStylePreview]);
 
   const clipIdRef = useRef<number | string | null>(null);
@@ -112,56 +154,143 @@ export function PropertiesPanel({
     }, 300);
   }, [selectedClip?.id, onTimelineChange]);
 
-  const handleApplyToAll = async () => {
+  const handleStartApplyAll = async () => {
     if (!selectedClip) return;
-    const allClips = await db.getTimelineClips(selectedClip.project_id);
-    const textClips = allClips.filter(c => c.track_type === 'text');
-    
-    await Promise.all(textClips.map(clip => db.updateCaptionStyle(clip.id, localCaptionStyle)));
-    onTimelineChange();
+    try {
+      const allClips = await db.getTimelineClips(selectedClip.project_id);
+      const textClips = allClips.filter(c => c.track_type === 'text');
+      setTextClipCount(textClips.length);
+      setPendingApplyAll(true);
+    } catch (err) {
+      console.error('Failed to count text clips:', err);
+      setPendingApplyAll(true); // Fallback
+    }
   };
 
+  const handleApplyToAll = async () => {
+    if (!selectedClip) return;
+
+    // BUG 1 FIX: Immediately cancel any pending individual save to prevent overwriting this bulk update
+    if (debounceTimerRef.current) {
+      window.clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+
+    setPendingApplyAll(false);
+    setIsApplying(true);
+    onBeforeChange?.();
+    isApplyingRef.current = true;
+
+    try {
+      const allClips = await db.getTimelineClips(selectedClip.project_id);
+      const textClips = allClips.filter(c => c.track_type === 'text');
+
+      // BUG 4 FIX: Serialize writes to prevent SQLite write contention
+      await db.batchUpdateCaptionStyle(textClips.map(c => ({ id: c.id, style: localCaptionStyle })));
+
+      onSilentRefresh?.();
+    } catch (err) {
+      console.error('Failed to apply style to all clips:', err);
+    } finally {
+      setIsApplying(false);
+      isApplyingRef.current = false;
+    }
+  };
+
+  // UX 1: Keyboard shortcuts for pending apply
+  const handleApplyToAllRef = useRef(handleApplyToAll);
+  useEffect(() => {
+    handleApplyToAllRef.current = handleApplyToAll;
+  }, [handleApplyToAll]);
+
+  useEffect(() => {
+    if (!pendingApplyAll) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleApplyToAllRef.current();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setPendingApplyAll(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pendingApplyAll]);
+
   const handleManualCaption = async () => {
-    const text = window.prompt("Enter caption text:");
-    if (!text) return;
-    
-    const projectId = selectedClip?.project_id || 1; 
-    const words = text.split(' ').map((w, i) => ({
-      word: w,
-      start: i * 0.5,
-      end: (i + 1) * 0.5
-    }));
-    const duration = words.length * 0.5;
-    const chunkData = { text, words };
-    const asset = await db.addAsset(projectId, `text://${JSON.stringify(chunkData)}`, 'text', duration);
+    if (!manualText.trim()) return;
+
+    const projectId = selectedClip?.project_id;
+    if (!projectId) {
+      alert("Please ensure a project is loaded.");
+      return;
+    }
+
+    const words = manualText.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return;
+
+    // Estimate duration: 0.4s per word on average, minimum 1.0s
+    const totalDuration = Math.max(1.0, words.length * 0.4);
+    const totalChars = words.reduce((acc, w) => acc + w.length, 0);
+
+    let currentOffset = 0;
+    const wordObjects = words.map((word) => {
+      // Allocate time based on character length proportion, with a 0.2s minimum
+      const proportion = word.length / totalChars;
+      const duration = Math.max(0.2, proportion * totalDuration);
+
+      const start = currentOffset;
+      const end = currentOffset + duration;
+      currentOffset = end;
+
+      return { word, start, end };
+    });
+
+    const finalDuration = currentOffset;
+    const chunkData = {
+      text: manualText.trim(),
+      words: wordObjects,
+      start: 0,
+      end: finalDuration,
+    };
+
+    const asset = await db.addAsset(projectId, `text://${JSON.stringify(chunkData)}`, 'text', finalDuration);
     await db.addClipToTimelineSpecific(
       projectId,
       asset.id,
-      duration,
+      finalDuration,
       'text',
       0,
       playheadSeconds
     );
+    setManualText('');
+    setShowManualInput(false);
     onTimelineChange();
   };
 
   // ── Caption Words State ─────────────────────────────────────
-  const [localWords, setLocalWords] = useState<any[]>([]);
+  // FIX: Converted to useRef + useReducer forced updates to solve stale closures
+  const localWordsRef = useRef<any[]>([]);
+  const [, forceUpdate] = useReducer((x) => x + 1, 0);
   const [localText, setLocalText] = useState<string>('');
 
   useEffect(() => {
     if (selectedClip?.track_type === 'text' && selectedClip.file_path?.startsWith('text://')) {
       try {
         const chunkData = JSON.parse(selectedClip.file_path.substring(7));
-        setLocalWords(chunkData.words || []);
+        localWordsRef.current = chunkData.words || [];
         setLocalText(chunkData.text || '');
+        forceUpdate();
       } catch (e) {
-        setLocalWords([]);
+        localWordsRef.current = [];
         setLocalText('');
+        forceUpdate();
       }
     } else {
-      setLocalWords([]);
+      localWordsRef.current = [];
       setLocalText('');
+      forceUpdate();
     }
   }, [selectedClip?.file_path, selectedClip?.track_type, selectedClip?.id]);
 
@@ -170,13 +299,15 @@ export function PropertiesPanel({
     lastTextRef.current = newText;
     const currentClipId = selectedClip?.id;
     const currentAssetId = selectedClip?.asset_id;
+    const currentFilePath = selectedClip?.file_path || '';
     if (!currentClipId || !currentAssetId) return;
+
+    setSaveStatus('pending');
 
     // Immediately compute and sync UI
     try {
-      const filePath = selectedClip?.file_path || '';
-      if (filePath.startsWith('text://')) {
-        const data = JSON.parse(filePath.substring(7));
+      if (currentFilePath.startsWith('text://')) {
+        const data = JSON.parse(currentFilePath.substring(7));
         const oldWords = data.words || [];
         const newTokens = newText.trim().split(/\s+/).filter(Boolean);
         const mergedWords = newTokens.map((token, i) => {
@@ -184,19 +315,30 @@ export function PropertiesPanel({
           const lastEnd = oldWords[oldWords.length - 1]?.end ?? 0;
           return { word: token, start: lastEnd + i * 0.3, end: lastEnd + (i + 1) * 0.3 };
         });
-        setLocalWords(mergedWords);
-        onTimelineChange(); // Trigger real-time preview update
+
+        localWordsRef.current = mergedWords;
+        forceUpdate();
+
+        // BUG 1 FIX: Instead of calling onTimelineChange (which fetches stale DB data),
+        // update the parent's in-memory state immediately.
+        const updated = { ...data, text: newText, words: mergedWords };
+        onLiveClipUpdate?.(Number(currentClipId), {
+          file_path: `text://${JSON.stringify(updated)}`
+        });
       }
-    } catch (e) {}
+    } catch (e) { }
 
     if (textSaveDebounceRef.current) window.clearTimeout(textSaveDebounceRef.current);
 
     textSaveDebounceRef.current = window.setTimeout(async () => {
+      // UX 3 FIX: clip changed during debounce timeout, abort stale save
+      if (latestClipIdRef.current !== currentClipId) return;
+
       const textToSave = lastTextRef.current;
-      const filePath = selectedClip?.file_path || '';
-      if (!filePath.startsWith('text://')) return;
+      const latestFilePath = filePathRef.current || '';
+      if (!latestFilePath.startsWith('text://')) return;
       try {
-        const data = JSON.parse(filePath.substring(7));
+        const data = JSON.parse(latestFilePath.substring(7));
         const oldWords = data.words || [];
         const newTokens = textToSave.trim().split(/\s+/).filter(Boolean);
         const finalMerged = newTokens.map((token, i) => {
@@ -206,27 +348,64 @@ export function PropertiesPanel({
         });
         const updated = { ...data, text: textToSave, words: finalMerged };
         await db.updateAssetFilePath(currentAssetId, `text://${JSON.stringify(updated)}`);
-      } catch (err) { console.error('Failed to save caption text:', err); }
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch (err) {
+        console.error('Failed to save caption text:', err);
+        setSaveStatus('error');
+      }
     }, 300);
   };
 
   const wordsDebounceTimerRef = useRef<number | null>(null);
 
-  const handleWordChange = useCallback((index: number, field: 'start' | 'end', value: number) => {
+  const handleWordChange = useCallback((index: number, field: 'start' | 'end' | 'word', value: any) => {
     const currentClipId = selectedClip?.id;
     if (!currentClipId) return;
-    setLocalWords(prev => {
-      const next = [...prev];
-      if (!next[index]) return prev;
-      next[index] = { ...next[index], [field]: value };
-      if (wordsDebounceTimerRef.current) window.clearTimeout(wordsDebounceTimerRef.current);
-      wordsDebounceTimerRef.current = window.setTimeout(async () => {
-        try { await db.updateCaptionWords(currentClipId, next); }
-        catch (err) { console.error('Failed to save word timing:', err); }
-      }, 400);
-      return next;
-    });
-  }, [selectedClip?.id]);
+
+    let validatedValue = value;
+    // UX 4 FIX: reject NaN/Infinity string to number parse errors from uncontrolled clearing
+    if (typeof value === 'number' && !isFinite(value)) return;
+
+    // Use current ref instead of closure snapshot to prevent rapid overwrite bugs
+    const next = [...localWordsRef.current];
+    const word = next[index];
+    if (!word) return;
+
+    let isInvalid = false;
+
+    if (field === 'start') {
+      if (value >= word.end) {
+        validatedValue = word.end - 0.01;
+        isInvalid = true;
+      }
+    } else if (field === 'end') {
+      if (value <= word.start) {
+        validatedValue = word.start + 0.01;
+        isInvalid = true;
+      }
+    }
+
+    setInvalidWordIdx(isInvalid ? index : null);
+    next[index] = { ...word, [field]: validatedValue };
+
+    // Sort to prevent rendering overlaps
+    if (field === 'start' || field === 'end') {
+      next.sort((a, b) => a.start - b.start);
+    }
+
+    localWordsRef.current = next;
+    forceUpdate();
+
+    if (wordsDebounceTimerRef.current) window.clearTimeout(wordsDebounceTimerRef.current);
+    wordsDebounceTimerRef.current = window.setTimeout(async () => {
+      try {
+        await db.updateCaptionWords(currentClipId, next);
+      } catch (err) {
+        console.error('Failed to save word timing:', err);
+      }
+    }, 400);
+  }, [selectedClip?.id]); // FIX: removed localWords from deps
 
   // ──────────────────────────────────────────────────────────
   // Main AI job handler
@@ -237,7 +416,7 @@ export function PropertiesPanel({
       return;
     }
 
-    const clipId  = selectedClip.id;
+    const clipId = selectedClip.id;
     const assetId = selectedClip.asset_id;
     const filePath = selectedClip.file_path;
 
@@ -289,14 +468,14 @@ export function PropertiesPanel({
 
         // Store in DB
         await db.upsertAiMetadata(clipId, step, 'completed', rawJson);
-        
+
         // Clear old text clips to prevent duplicates on regenerate
         // TODO: Add parent_clip_id to timeline_clips schema for proper hierarchy tracking.
         // For now, filter the deletion by track_lane === 0 and timeline_start within the selectedClip's bounds.
         const clipDuration = selectedClip.end_time - selectedClip.start_time;
         await db.clearTextClipsWithinBounds(
-          selectedClip.project_id, 
-          selectedClip.timeline_start, 
+          selectedClip.project_id,
+          selectedClip.timeline_start,
           selectedClip.timeline_start + clipDuration
         );
 
@@ -308,7 +487,7 @@ export function PropertiesPanel({
         // Auto-populate text track
         for (const chunk of parsed.chunks) {
           if (!chunk.text) continue;
-          
+
           // Only include chunks that overlap with the selected clip's visible region
           if (chunk.end <= clipStart || chunk.start >= clipEnd) continue;
 
@@ -316,7 +495,7 @@ export function PropertiesPanel({
           const clampedStart = Math.max(chunk.start, clipStart);
           const clampedEnd = Math.min(chunk.end, clipEnd);
           const duration = clampedEnd - clampedStart;
-          
+
           if (duration <= 0) continue;
 
           // The start of the chunk relative to the clip's start time
@@ -332,9 +511,9 @@ export function PropertiesPanel({
           // against wordObj.start / wordObj.end which are also absolute.
           // TODO: pass clip start_time offset to whisper-ctranslate2 via --offset flag 
           // so word timestamps are relative to the full file correctly.
-          const chunkToSave = { 
-            ...chunk, 
-            start: clampedStart, 
+          const chunkToSave = {
+            ...chunk,
+            start: clampedStart,
             end: clampedEnd,
             words: (chunk.words || []).map((w: any) => ({
               ...w,
@@ -379,7 +558,8 @@ export function PropertiesPanel({
 
   const handleExportSrt = async () => {
     try {
-      const projectId = selectedClip?.project_id || 1;
+      const projectId = selectedClip?.project_id;
+      if (!projectId) return;
       const srt = await db.exportCaptionsSrt(projectId);
       if (!srt || srt.trim().length === 0) {
         alert('No captions found. Generate captions first using the Captions button.');
@@ -405,10 +585,10 @@ export function PropertiesPanel({
   // ──────────────────────────────────────────────────────────
   // Shorthand status helpers
   // ──────────────────────────────────────────────────────────
-  const captionStatus  = selectedClip?.ai_metadata?.['captions']?.status;
-  const denoiseStatus  = selectedClip?.ai_metadata?.['denoise']?.status;
-  const isCaptionBusy  = captionStatus  === 'processing';
-  const isDenoiseBusy  = denoiseStatus  === 'processing';
+  const captionStatus = selectedClip?.ai_metadata?.['captions']?.status;
+  const denoiseStatus = selectedClip?.ai_metadata?.['denoise']?.status;
+  const isCaptionBusy = captionStatus === 'processing';
+  const isDenoiseBusy = denoiseStatus === 'processing';
 
   // ──────────────────────────────────────────────────────────
   // Render
@@ -417,9 +597,9 @@ export function PropertiesPanel({
     <div className="prop-inspector">
       {!selectedClip ? (
         <div className="prop-empty" style={{ flexDirection: 'column', textAlign: 'center', padding: '40px 20px' }}>
-          <div style={{ 
-            fontSize: '48px', 
-            marginBottom: '16px', 
+          <div style={{
+            fontSize: '48px',
+            marginBottom: '16px',
             opacity: 0.5,
             filter: 'grayscale(1) brightness(1.5)'
           }}>
@@ -431,24 +611,49 @@ export function PropertiesPanel({
           <div style={{ fontSize: '12px', color: 'var(--ac-text-muted)', lineHeight: '1.6', maxWidth: '200px', marginBottom: '24px' }}>
             Select a clip on the timeline to adjust its properties and style.
           </div>
-          
+
           <div style={{ width: '100%', height: '1px', background: 'linear-gradient(90deg, transparent, var(--ac-border-subtle), transparent)', marginBottom: '24px' }} />
-          
-          <button 
-            className="prop-ai-btn" 
-            style={{ 
-              width: '100%', 
-              height: '40px',
-              background: 'linear-gradient(135deg, #7c5cfc 0%, #5b3fd1 100%)',
-              boxShadow: '0 4px 12px rgba(124, 92, 252, 0.3)',
-              border: 'none',
-              borderRadius: '8px'
-            }}
-            onClick={handleManualCaption}
-          >
-            <span style={{ fontSize: '14px', marginRight: '6px' }}>+</span>
-            Add Manual Caption
-          </button>
+
+          {showManualInput ? (
+            <div style={{ width: '100%', background: 'var(--ac-bg-overlay)', padding: '12px', borderRadius: '8px', border: '1px solid var(--ac-border)' }}>
+              <input
+                autoFocus
+                placeholder="Type caption..."
+                value={manualText}
+                onChange={e => setManualText(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleManualCaption()}
+                style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: '14px', marginBottom: '12px' }}
+              />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  className="prop-ai-btn"
+                  style={{ flex: 1, background: 'var(--ac-accent)', color: '#fff', border: 'none', borderRadius: '4px', height: '32px', fontSize: '12px' }}
+                  onClick={handleManualCaption}
+                >Add</button>
+                <button
+                  className="prop-ai-btn"
+                  style={{ flex: 1, background: 'var(--ac-bg-elevated)', color: 'var(--ac-text-muted)', border: 'none', borderRadius: '4px', height: '32px', fontSize: '12px' }}
+                  onClick={() => setShowManualInput(false)}
+                >Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button
+              className="prop-ai-btn"
+              style={{
+                width: '100%',
+                height: '40px',
+                background: 'linear-gradient(135deg, #7c5cfc 0%, #5b3fd1 100%)',
+                boxShadow: '0 4px 12px rgba(124, 92, 252, 0.3)',
+                border: 'none',
+                borderRadius: '8px'
+              }}
+              onClick={() => setShowManualInput(true)}
+            >
+              <span style={{ fontSize: '14px', marginRight: '6px' }}>+</span>
+              Add Manual Caption
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -502,7 +707,6 @@ export function PropertiesPanel({
                     maxWidth: '100%',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
                     position: 'relative',
                     zIndex: 1,
                   }}
@@ -519,10 +723,30 @@ export function PropertiesPanel({
 
           {/* ── Content area (scrollable) ─────────────────── */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-            
+
             {selectedClip.track_type === 'text' && (
               <div className="prop-section">
-                <div className="prop-section-header">Edit Caption</div>
+                <div className="prop-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Edit Caption</span>
+                  {saveStatus !== 'idle' && (
+                    <span style={{
+                      fontSize: '10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      color: saveStatus === 'pending' ? '#f59e0b' : saveStatus === 'saved' ? '#10b981' : '#ef4444'
+                    }}>
+                      <span style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        background: 'currentColor',
+                        boxShadow: saveStatus === 'pending' ? '0 0 6px #f59e0b' : 'none'
+                      }} />
+                      {saveStatus === 'pending' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : 'Error'}
+                    </span>
+                  )}
+                </div>
                 <textarea
                   className="prop-textarea"
                   value={localText}
@@ -543,11 +767,11 @@ export function PropertiesPanel({
                 />
               </div>
             )}
-            
+
             {/* ── Transform ───────────────────────────────── */}
             <div className="prop-section">
               <div className="prop-section-header">Transform</div>
-              
+
               <div className="prop-slider-row">
                 <div className="prop-slider-label">Scale</div>
                 <div className="prop-slider-container">
@@ -584,22 +808,73 @@ export function PropertiesPanel({
             {/* ── Caption Style Editor ─────── */}
             {(selectedClip.track_type === 'text' || selectedClip.ai_metadata?.['captions']?.status === 'completed' || !!selectedClip.ai_metadata?.['captions']?.json_data) && (
               <div className="prop-section">
-                <div className="prop-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="prop-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: pendingApplyAll ? '8px' : '0' }}>
                   <span>Caption Style</span>
-                  <button className="prop-apply-all-btn" onClick={handleApplyToAll}>
-                    Apply to All
-                  </button>
+                  {isApplying ? (
+                    <div style={{ fontSize: '12px', color: 'var(--ac-text-muted)' }}>Applying…</div>
+                  ) : !pendingApplyAll && (
+                    <button className="prop-apply-all-btn" onClick={handleStartApplyAll}>Apply to All</button>
+                  )}
                 </div>
-                <CaptionStyleEditor
-                  clipId={String(selectedClip.id)}
-                  currentStyle={localCaptionStyle}
-                  onChange={handleCaptionStyleChange}
-                />
+
+                {pendingApplyAll && !isApplying && (
+                  <div style={{
+                    background: 'var(--ac-bg-overlay)',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    marginBottom: '16px',
+                    animation: 'slideDown 0.2s ease-out'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#fff', marginBottom: '12px', lineHeight: '1.4' }}>
+                      Apply this style to <strong>all {textClipCount} caption clips</strong>? This cannot be undone per-clip.
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <button
+                        style={{
+                          width: '100%',
+                          background: '#f59e0b',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '8px',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          cursor: 'pointer'
+                        }}
+                        onClick={handleApplyToAll}
+                      >Confirm (Enter)</button>
+                      <button
+                        style={{
+                          width: '100%',
+                          background: 'var(--ac-bg-elevated)',
+                          color: 'var(--ac-text-muted)',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '8px',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => setPendingApplyAll(false)}
+                      >Cancel (Esc)</button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ opacity: isApplying ? 0.5 : 1, pointerEvents: isApplying ? 'none' : 'auto' }}>
+                  <CaptionStyleEditor
+                    currentStyle={localCaptionStyle}
+                    onChange={(newStyle) => {
+                      if (isApplying) return;
+                      handleCaptionStyleChange(newStyle);
+                    }}
+                  />
+                </div>
               </div>
             )}
 
             {/* ── Words Editor ──────────────────────────────── */}
-            {selectedClip.track_type === 'text' && localWords.length > 0 && (
+            {selectedClip.track_type === 'text' && localWordsRef.current.length > 0 && (
               <div className="prop-section">
                 <div className="prop-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>Word Timing</span>
@@ -616,52 +891,49 @@ export function PropertiesPanel({
                   borderBottom: '1px solid var(--ac-border)',
                   marginBottom: '8px',
                 }}>
-                  {localWords.map((w, idx) => {
-                    const dur = w.end - w.start;
-                    const totalDur = localWords.reduce((acc, word, i) => {
+                  {(() => {
+                    const totalDur = localWordsRef.current.reduce((acc, word, i) => {
                       const wordDur = word.end - word.start;
-                      const gap = i < localWords.length - 1 ? Math.max(0, localWords[i + 1].start - word.end) : 0;
+                      const gap = i < localWordsRef.current.length - 1 ? Math.max(0, localWordsRef.current[i + 1].start - word.end) : 0;
                       return acc + wordDur + gap;
                     }, 0) || 1;
-                    const widthPct = Math.max(5, (dur / totalDur) * 100);
-                    return (
-                      <div
-                        key={`pill-${idx}-${w.word}`}
-                        title={`${w.word}: ${w.start.toFixed(2)}s → ${w.end.toFixed(2)}s`}
-                        style={{
-                          width: `${widthPct}%`,
-                          minWidth: '24px',
-                          background: 'var(--ac-accent-dim)',
-                          border: '1px solid var(--ac-accent)',
-                          borderRadius: '4px',
-                          padding: '3px 5px',
-                          fontSize: '10px',
-                          color: 'var(--ac-accent-text)',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          cursor: 'pointer',
-                          transition: 'background 0.1s',
-                        }}
-                      >
-                        {w.word}
-                      </div>
-                    );
-                  })}
+                    return localWordsRef.current.map((w, idx) => {
+                      const dur = w.end - w.start;
+                      const widthPct = Math.max(5, (dur / totalDur) * 100);
+                      return (
+                        <div
+                          key={`pill-${idx}-${w.word}`}
+                          title={`${w.word}: ${w.start.toFixed(2)}s → ${w.end.toFixed(2)}s`}
+                          style={{
+                            width: `${widthPct}%`,
+                            minWidth: '24px',
+                            background: 'var(--ac-accent-dim)',
+                            border: '1px solid var(--ac-accent)',
+                            borderRadius: '4px',
+                            padding: '3px 5px',
+                            fontSize: '10px',
+                            color: 'var(--ac-accent-text)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            cursor: 'pointer',
+                            transition: 'background 0.1s',
+                          }}
+                        >
+                          {w.word}
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
                 {/* Editable rows */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {localWords.map((w, idx) => (
+                  {localWordsRef.current.map((w, idx) => (
                     <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 60px 60px 24px', gap: '6px', alignItems: 'center' }}>
                       <input
                         type="text"
                         value={w.word}
-                        onChange={e => {
-                          const next = [...localWords];
-                          next[idx] = { ...next[idx], word: e.target.value };
-                          setLocalWords(next);
-                        }}
-                        onBlur={() => handleWordChange(idx, 'start', localWords[idx].start)}
+                        onChange={e => handleWordChange(idx, 'word', e.target.value)}
                         style={{
                           fontSize: '11px', padding: '3px 6px',
                           background: 'var(--ac-bg-elevated)',
@@ -675,19 +947,36 @@ export function PropertiesPanel({
                       <input
                         type="number" step="0.01"
                         value={w.start.toFixed(2)}
-                        onChange={e => handleWordChange(idx, 'start', parseFloat(e.target.value))}
-                        style={{ fontSize: '10px', padding: '3px 4px', background: 'var(--ac-bg-elevated)', border: '1px solid var(--ac-border)', color: 'var(--ac-text-muted)', borderRadius: '4px', width: '100%' }}
+                        onChange={e => handleWordChange(idx, 'start', isNaN(parseFloat(e.target.value)) ? w.start : parseFloat(e.target.value))}
+                        style={{
+                          fontSize: '10px',
+                          padding: '3px 4px',
+                          background: 'var(--ac-bg-elevated)',
+                          border: `1px solid ${invalidWordIdx === idx ? '#ef4444' : 'var(--ac-border)'}`,
+                          color: 'var(--ac-text-muted)',
+                          borderRadius: '4px',
+                          width: '100%'
+                        }}
                       />
                       <input
                         type="number" step="0.01"
                         value={w.end.toFixed(2)}
-                        onChange={e => handleWordChange(idx, 'end', parseFloat(e.target.value))}
-                        style={{ fontSize: '10px', padding: '3px 4px', background: 'var(--ac-bg-elevated)', border: '1px solid var(--ac-border)', color: 'var(--ac-text-muted)', borderRadius: '4px', width: '100%' }}
+                        onChange={e => handleWordChange(idx, 'end', isNaN(parseFloat(e.target.value)) ? w.end : parseFloat(e.target.value))}
+                        style={{
+                          fontSize: '10px',
+                          padding: '3px 4px',
+                          background: 'var(--ac-bg-elevated)',
+                          border: `1px solid ${invalidWordIdx === idx ? '#ef4444' : 'var(--ac-border)'}`,
+                          color: 'var(--ac-text-muted)',
+                          borderRadius: '4px',
+                          width: '100%'
+                        }}
                       />
                       <button
                         onClick={() => {
-                          const next = localWords.filter((_, i) => i !== idx);
-                          setLocalWords(next);
+                          const next = localWordsRef.current.filter((_, i) => i !== idx);
+                          localWordsRef.current = next;
+                          forceUpdate();
                           if (selectedClip?.id) db.updateCaptionWords(selectedClip.id, next).catch(console.error);
                         }}
                         style={{ background: 'transparent', border: 'none', color: 'var(--ac-text-muted)', cursor: 'pointer', fontSize: '13px', padding: 0 }}
@@ -698,10 +987,11 @@ export function PropertiesPanel({
                 </div>
                 <button
                   onClick={() => {
-                    const last = localWords[localWords.length - 1];
+                    const last = localWordsRef.current[localWordsRef.current.length - 1];
                     const newWord = { word: 'word', start: last?.end ?? 0, end: (last?.end ?? 0) + 0.5 };
-                    const next = [...localWords, newWord];
-                    setLocalWords(next);
+                    const next = [...localWordsRef.current, newWord];
+                    localWordsRef.current = next;
+                    forceUpdate();
                     if (selectedClip?.id) db.updateCaptionWords(selectedClip.id, next).catch(console.error);
                   }}
                   style={{
@@ -717,7 +1007,11 @@ export function PropertiesPanel({
             <div className="prop-section">
               <div className="prop-section-header">
                 AI Tools
-                <StatusBadge status={captionStatus || denoiseStatus} />
+                <StatusBadge status={
+                  (captionStatus === 'processing' || denoiseStatus === 'processing')
+                    ? 'processing'
+                    : (captionStatus || denoiseStatus)
+                } />
               </div>
               <div className="prop-ai-btn-row">
                 <button

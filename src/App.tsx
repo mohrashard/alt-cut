@@ -57,11 +57,8 @@ function historyReducer(state: HistoryState, action: HistoryAction): HistoryStat
 
 function useTimelineHistory() {
   const [state, dispatch] = useReducer(historyReducer, { past: [], present: [], future: [] });
-  const initialized = useRef(false);
 
   const init = useCallback((clips: TimelineClip[]) => {
-    if (initialized.current) return;
-    initialized.current = true;
     dispatch({ type: 'INIT', clips });
   }, []);
 
@@ -143,7 +140,7 @@ export default function App() {
       history.init(clips);
     });
     return () => ctrl.abort();
-  }, [project?.id, history]);
+  }, [project?.id, history.init]);
 
   // Load transitions when clip IDs change
   const clipIdsKey = useMemo(() => timelineClips.map(c => c.id).join(','), [timelineClips]);
@@ -178,6 +175,17 @@ export default function App() {
     history.replace(clips);
   }, [project?.id, history]);
 
+  const handleSilentRefresh = useCallback(async () => {
+    if (!project?.id) return;
+    const db = await import('./lib/db');
+    const clips = await db.getTimelineClips(project.id);
+    history.replace(clips);
+  }, [project?.id, history]);
+
+  const handleLiveClipUpdate = useCallback((clipId: number, patch: Partial<TimelineClip>) => {
+    setTimelineClips(prev => prev.map(c => c.id === clipId ? { ...c, ...patch } : c));
+  }, []);
+
   const handleMarkersChange = useCallback(async () => {
     if (!project?.id) return;
     const db = await import('./lib/db');
@@ -200,7 +208,12 @@ export default function App() {
       }
     } catch (err) {
       console.error("Mutation failed:", err);
-      // TODO: replace alert with toast
+      // Rollback: Re-sync UI with current DB state
+      if (project?.id) {
+        const db = await import('./lib/db');
+        const clips = await db.getTimelineClips(project.id);
+        history.replace(clips);
+      }
     }
   }, [history, project?.id]);
 
@@ -400,6 +413,9 @@ export default function App() {
             onFeaturesChange={setFeatures}
             selectedClip={selectedClip}
             onTimelineChange={handleTimelineChange}
+            onSilentRefresh={handleSilentRefresh}
+            onBeforeChange={onBeforeChange}
+            onLiveClipUpdate={handleLiveClipUpdate}
             playheadSeconds={playheadSeconds}
             onStylePreview={(id, style) => setStyleOverride(id && style ? { clipId: id, style } : null)}
           />

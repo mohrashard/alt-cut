@@ -145,17 +145,21 @@ export async function addAsset(
   projectId: number, filePath: string, type: string, duration = 0
 ): Promise<Asset> {
   const db = await getDb();
-  const existing = await db.select<Asset[]>(
-    'SELECT * FROM assets WHERE project_id = $1 AND file_path = $2', [projectId, filePath]
-  );
 
-  if (existing.length > 0) {
-    const asset = existing[0];
-    if ((!asset.duration || asset.duration <= 0) && duration > 0) {
-      await db.execute('UPDATE assets SET duration = $1 WHERE id = $2', [duration, asset.id]);
-      asset.duration = duration;
+  // BUG 8 FIX: Skip deduplication for text blobs so every caption is unique
+  if (!filePath.startsWith('text://')) {
+    const existing = await db.select<Asset[]>(
+      'SELECT * FROM assets WHERE project_id = $1 AND file_path = $2', [projectId, filePath]
+    );
+
+    if (existing.length > 0) {
+      const asset = existing[0];
+      if ((!asset.duration || asset.duration <= 0) && duration > 0) {
+        await db.execute('UPDATE assets SET duration = $1 WHERE id = $2', [duration, asset.id]);
+        asset.duration = duration;
+      }
+      return asset;
     }
-    return asset;
   }
 
   const { lastInsertId } = await db.execute(
@@ -273,13 +277,25 @@ export async function getTimelineClips(projectId: number): Promise<TimelineClip[
     ORDER BY c.track_type ASC, c.track_lane ASC, c.timeline_start ASC
   `;
   const clips = await db.select<TimelineClip[]>(query, [projectId]);
+  if (clips.length === 0) return [];
+
+  // Batch fetch ai_metadata for all clips in ONE query (fixes N+1 latency)
+  const clipIds = clips.map(c => c.id);
+  const placeholders = clipIds.map((_, i) => `$${i + 1}`).join(',');
+  const allMetas = await db.select<AiMetadata[]>(
+    `SELECT * FROM ai_metadata WHERE clip_id IN (${placeholders})`,
+    clipIds
+  );
+
+  // Map metadata to clips for fast O(1) lookup
+  const metaMap: Record<number, Record<string, AiMetadata>> = {};
+  for (const m of allMetas) {
+    if (!metaMap[m.clip_id]) metaMap[m.clip_id] = {};
+    metaMap[m.clip_id][m.feature_type] = m;
+  }
 
   for (const clip of clips) {
-    const metas = await db.select<AiMetadata[]>(
-      'SELECT * FROM ai_metadata WHERE clip_id = $1', [clip.id]
-    );
-    clip.ai_metadata = {};
-    for (const m of metas) clip.ai_metadata[m.feature_type] = m;
+    clip.ai_metadata = metaMap[clip.id] || {};
 
     // Default fallbacks for old rows
     if (!clip.track_type) clip.track_type = 'video';
@@ -447,6 +463,22 @@ export async function updateCaptionStyle(clipId: number, style: CaptionStyle): P
     return;
   }
   await db.execute('UPDATE timeline_clips SET caption_style=$1 WHERE id=$2', [styleStr, clipId]);
+}
+
+export async function batchUpdateCaptionStyle(clips: { id: number | string; style: CaptionStyle }[]): Promise<void> {
+  const db = await getDb();
+
+  await db.execute('BEGIN TRANSACTION');
+  try {
+    for (const { id, style } of clips) {
+      const sanitized = sanitizeCaptionStyle(style);
+      await db.execute('UPDATE timeline_clips SET caption_style=$1 WHERE id=$2', [JSON.stringify(sanitized), id]);
+    }
+    await db.execute('COMMIT');
+  } catch (error) {
+    await db.execute('ROLLBACK');
+    throw error;
+  }
 }
 
 export async function updateCaptionText(clipId: number, wordsJson: string): Promise<void> {
@@ -661,13 +693,16 @@ export async function restoreTimelineClips(
     await db.execute(
       `INSERT OR REPLACE INTO timeline_clips
          (id, project_id, asset_id, track_index, track_type, track_lane,
-          start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          start_time, end_time, timeline_start, audio_enabled, audio_volume, 
+          hidden, caption_style, effects, scale, audio_separated, paired_audio_clip_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [
         clip.id, clip.project_id, clip.asset_id, clip.track_index,
         clip.track_type || 'video', clip.track_lane ?? 0,
         clip.start_time, clip.end_time, clip.timeline_start,
         clip.audio_enabled ?? 1, clip.audio_volume ?? 1.0, clip.hidden ?? 0,
+        clip.caption_style ?? null, clip.effects ?? '{}', clip.scale ?? 1.0,
+        clip.audio_separated ?? 0, clip.paired_audio_clip_id ?? null
       ]
     );
   }

@@ -48,6 +48,7 @@ export function HormoziCaptions({
   const videoClips = safeClips.filter(c => !c.track_type || c.track_type === 'video');
   const audioClips = safeClips.filter(c => c.track_type === 'audio');
   const textClips = safeClips.filter(c => c.track_type === 'text');
+  const textClipsKey = textClips.map(c => `${c.id}-${c.file_path}`).join(',');
 
   const parsedTextClips = useMemo(() => {
     return textClips.map(clip => {
@@ -61,7 +62,7 @@ export function HormoziCaptions({
       }
       return { ...clip, chunkData };
     });
-  }, [textClips]);
+  }, [textClipsKey]);
 
   return (
     <AbsoluteFill style={{ backgroundColor: 'black' }}>

@@ -172,7 +172,7 @@ export const PreviewWindow = memo(function PreviewWindow({
   }, []);
 
   // ⚠️ CRITICAL: Use stable, lightweight hashes to prevent Remotion player remounting.
-  const clipsHash = useMemo(() => clips.map(c => `${c.id}-${c.timeline_start}-${c.start_time}-${c.end_time}`).join(','), [clips]);
+  const clipsHash = useMemo(() => clips.map(c => `${c.id}-${c.timeline_start}-${c.start_time}-${c.end_time}-${c.file_path ?? ''}`).join(','), [clips]);
   const transitionsHash = useMemo(() => transitions.map(t => `${t.id}-${t.duration_frames}`).join(','), [transitions]);
   const styleOverridesHash = styleOverrides ? `${styleOverrides.clipId}-${JSON.stringify(styleOverrides.style)}` : 'none';
 
@@ -210,6 +210,7 @@ export const PreviewWindow = memo(function PreviewWindow({
     styleOverrides
   }), [
     previewClips,
+    transitions,
     transitionsHash,
     displayX,
     displayY,
@@ -447,7 +448,7 @@ export const PreviewWindow = memo(function PreviewWindow({
                   top: `${displayY}%`,
                   left: `${50 + displayX}%`,
                   width: '85%',
-                  height: 80,
+                  height: 120, // Increased from 80 for better multi-line caption support
                   transform: 'translate(-50%, -50%)',
                   zIndex: 100,
                   border: isDragging ? '2px solid var(--ac-accent)' : '1.5px dashed rgba(255,255,255,0.3)',

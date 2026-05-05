@@ -300,7 +300,8 @@ function ToggleBtn({
 
 // ─── Main Component ───────────────────────────────────────────
 
-export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: Props) {
+export function CaptionStyleEditor({ currentStyle, onChange }: Omit<Props, 'clipId'>) {
+  const fontInputRef = React.useRef<HTMLInputElement>(null);
   const [userPresets, setUserPresets] = useState<{id: number, name: string, style_json: string}[]>([]);
   const [systemFonts, setSystemFonts] = useState<string[]>(FONT_OPTIONS);
 
@@ -375,14 +376,19 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
             />
           ))}
           {userPresets.map(up => {
-            let parsedStyle = s;
-            try { parsedStyle = JSON.parse(up.style_json); } catch {}
+            let parsedStyle: CaptionStyle | null = null;
+            try { 
+              parsedStyle = JSON.parse(up.style_json); 
+            } catch {
+              return null; // Skip malformed presets
+            }
+            if (!parsedStyle) return null;
             return (
               <PresetCard
                 key={`user-${up.id}`}
                 preset={{ ...parsedStyle, preset: up.name }}
                 isActive={s.preset === up.name}
-                onClick={() => onChange({ ...parsedStyle, preset: up.name })}
+                onClick={() => onChange({ ...parsedStyle!, preset: up.name })}
               />
             );
           })}
@@ -427,26 +433,33 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
           <input 
             type="file" 
             accept=".ttf,.otf" 
-            id="font-upload" 
+            ref={fontInputRef}
             style={{ display: 'none' }} 
             onChange={async (e) => {
               const file = e.target.files?.[0];
               if (!file) return;
               try {
                 const { invoke } = await import('@tauri-apps/api/core');
-                const path = (file as any).path || file.name;
+                // In some Tauri versions, the path is available on the file object
+                // If not, we might need the open dialog, but let's try to get it from the event
+                const path = (file as any).path;
+                if (!path) {
+                  alert("Could not determine font path. Please use the system font installer or ensure Tauri file path access is enabled.");
+                  return;
+                }
                 await invoke('install_font', { path });
                 const fonts = await invoke<string[]>('get_system_fonts');
                 setSystemFonts(prev => Array.from(new Set([...prev, ...fonts])).sort());
               } catch (err) {
                 console.error(err);
+                alert("Failed to install font: " + String(err));
               }
               e.target.value = '';
             }}
           />
           <button 
             title="Install Font"
-            onClick={() => document.getElementById('font-upload')?.click()}
+            onClick={() => fontInputRef.current?.click()}
             style={{ 
               fontSize: '11px', padding: '2px 6px', borderRadius: '4px', 
               border: '1px solid var(--ac-border)', background: 'transparent', 
@@ -515,15 +528,14 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
                   minWidth: '32px'
                 }}
               >
-                {align === 'left' && '⬅'}
-                {align === 'center' && '↔'}
-                {align === 'right' && '➡'}
+                {align === 'left' && '≡'}
+                {align === 'center' && '≣'}
+                {align === 'right' && '≡'}
               </button>
             ))}
           </div>
         </Row>
-        {/* Line height */}
-        <Row label="Line H.">
+        <Row label="Line Height">
           <RangeInput
             min={0.8} max={2.0} step={0.05}
             value={s.lineHeight}
@@ -532,7 +544,7 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
         </Row>
 
         {/* Letter spacing */}
-        <Row label="Letter S.">
+        <Row label="Letter Spacing">
           <RangeInput
             min={-5} max={20} step={0.5}
             value={s.letterSpacing}
@@ -553,7 +565,7 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
         <Row label="Stroke">
           <ColorInput value={s.strokeColor} onChange={v => set('strokeColor', v)} />
         </Row>
-        <Row label="Stroke W.">
+        <Row label="Stroke Width">
           <RangeInput
             min={0} max={8} step={0.5}
             value={s.strokeWidth}
@@ -609,14 +621,16 @@ export function CaptionStyleEditor({ clipId: _clipId, currentStyle, onChange }: 
             <ColorInput value={s.bgColor} onChange={v => set('bgColor', v)} />
           )}
         </Row>
-        <Row label="BG Opacity">
-          <RangeInput
-            min={0} max={100} step={1}
-            value={Math.round(s.bgOpacity * 100)}
-            onChange={v => set('bgOpacity', v / 100)}
-            formatValue={v => `${v}%`}
-          />
-        </Row>
+        {s.lineBgEnabled && (
+          <Row label="BG Opacity">
+            <RangeInput
+              min={0} max={100} step={1}
+              value={Math.round(s.bgOpacity * 100)}
+              onChange={v => set('bgOpacity', v / 100)}
+              formatValue={v => `${v}%`}
+            />
+          </Row>
+        )}
         <Row label="Fade In">
           <RangeInput
             min={0} max={1} step={0.05}
