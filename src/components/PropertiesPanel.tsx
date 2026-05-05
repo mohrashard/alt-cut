@@ -45,14 +45,15 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
+const DEFAULT_FEATURES: AppFeatures = {
+  fontFamily: 'Arial',
+  captionX: 0,
+  captionY: 80,
+};
+
 export function PropertiesPanel({
   selectedClip, onFeaturesChange, onTimelineChange, onSilentRefresh, onBeforeChange, onLiveClipUpdate, playheadSeconds, onStylePreview
 }: PropertiesProps) {
-  const [features] = useState<AppFeatures>({
-    fontFamily: 'Arial',
-    captionX: 0,
-    captionY: 80, // Default to bottom area
-  });
   const [log, setLog] = useState<string>('');
   const [clipScale, setClipScale] = useState<number>(100);
   const [localVolume, setLocalVolume] = useState<number>(1.0);
@@ -66,7 +67,6 @@ export function PropertiesPanel({
   const volumeDebounceRef = useRef<number | null>(null);
   const scaleDebounceRef = useRef<number | null>(null);
   const textSaveDebounceRef = useRef<number | null>(null);
-  const lastTextRef = useRef<string>('');
   const filePathRef = useRef<string | undefined>(selectedClip?.file_path);
   const isApplyingRef = useRef(false);
   const latestClipIdRef = useRef<number | string | undefined>(selectedClip?.id);
@@ -80,8 +80,8 @@ export function PropertiesPanel({
   }, [selectedClip?.id]);
 
   useEffect(() => {
-    if (onFeaturesChange) onFeaturesChange(features);
-  }, [features, onFeaturesChange]);
+    if (onFeaturesChange) onFeaturesChange(DEFAULT_FEATURES);
+  }, [onFeaturesChange]);
 
   // ── Cleanup Debounce Timers ────────────────────────────────
   useEffect(() => {
@@ -118,15 +118,23 @@ export function PropertiesPanel({
   // Sync when clip changes OR when caption_style data changes (e.g. after Apply to All)
   const prevClipIdRef = useRef<number | string | undefined>(undefined);
   useEffect(() => {
-    // Do not overwrite local style if we are mid-flight in an Apply operation
-    if (isApplyingRef.current) return;
-
     const idChanged = selectedClip?.id !== prevClipIdRef.current;
+
+    // CASE 1: Switched clips -> ALWAYS sync to the new clip's style
     if (idChanged) {
       prevClipIdRef.current = selectedClip?.id;
+      setLocalCaptionStyle(parsedCaptionStyle);
       if (onStylePreview) onStylePreview(null, null);
+      return;
     }
-    // Always sync style when parsedCaptionStyle changes (covers Apply to All refreshing the same clip)
+
+    // CASE 2: Mid-flight operation -> DO NOT overwrite user's mid-edit state
+    if (isApplyingRef.current) return;
+
+    // CASE 3: User is actively editing (debouncing) -> DO NOT snap-back
+    if (debounceTimerRef.current) return;
+
+    // CASE 4: Idle refresh (e.g. from Apply All or other background update) -> Safe to sync
     setLocalCaptionStyle(parsedCaptionStyle);
   }, [parsedCaptionStyle, selectedClip?.id, onStylePreview]);
 
@@ -296,65 +304,56 @@ export function PropertiesPanel({
 
   const handleTextChange = (newText: string) => {
     setLocalText(newText);
-    lastTextRef.current = newText;
     const currentClipId = selectedClip?.id;
     const currentAssetId = selectedClip?.asset_id;
     const currentFilePath = selectedClip?.file_path || '';
-    if (!currentClipId || !currentAssetId) return;
+    if (!currentClipId || !currentAssetId || !currentFilePath.startsWith('text://')) return;
 
     setSaveStatus('pending');
 
-    // Immediately compute and sync UI
     try {
-      if (currentFilePath.startsWith('text://')) {
-        const data = JSON.parse(currentFilePath.substring(7));
-        const oldWords = data.words || [];
-        const newTokens = newText.trim().split(/\s+/).filter(Boolean);
-        const mergedWords = newTokens.map((token, i) => {
-          if (oldWords[i]) return { ...oldWords[i], word: token };
-          const lastEnd = oldWords[oldWords.length - 1]?.end ?? 0;
-          return { word: token, start: lastEnd + i * 0.3, end: lastEnd + (i + 1) * 0.3 };
-        });
+      const data = JSON.parse(currentFilePath.substring(7));
+      const oldWords = data.words || [];
+      const newTokens = newText.trim().split(/\s+/).filter(Boolean);
+      const mergedWords = newTokens.map((token, i) => {
+        if (oldWords[i]) return { ...oldWords[i], word: token };
+        const lastEnd = oldWords[oldWords.length - 1]?.end ?? 0;
+        return { word: token, start: lastEnd + i * 0.3, end: lastEnd + (i + 1) * 0.3 };
+      });
 
-        localWordsRef.current = mergedWords;
-        forceUpdate();
+      // 1. Update UI immediately (Optimistic UI)
+      const updatedData = { ...data, text: newText, words: mergedWords };
+      const updatedFilePath = `text://${JSON.stringify(updatedData)}`;
+      
+      localWordsRef.current = mergedWords;
+      forceUpdate();
 
-        // BUG 1 FIX: Instead of calling onTimelineChange (which fetches stale DB data),
-        // update the parent's in-memory state immediately.
-        const updated = { ...data, text: newText, words: mergedWords };
-        onLiveClipUpdate?.(Number(currentClipId), {
-          file_path: `text://${JSON.stringify(updated)}`
-        });
-      }
-    } catch (e) { }
+      onLiveClipUpdate?.(Number(currentClipId), {
+        file_path: updatedFilePath
+      });
 
-    if (textSaveDebounceRef.current) window.clearTimeout(textSaveDebounceRef.current);
+      // 2. Debounce database save
+      if (textSaveDebounceRef.current) window.clearTimeout(textSaveDebounceRef.current);
 
-    textSaveDebounceRef.current = window.setTimeout(async () => {
-      // UX 3 FIX: clip changed during debounce timeout, abort stale save
-      if (latestClipIdRef.current !== currentClipId) return;
+      textSaveDebounceRef.current = window.setTimeout(async () => {
+        // Only save if we are still on the same clip
+        if (latestClipIdRef.current !== currentClipId) return;
 
-      const textToSave = lastTextRef.current;
-      const latestFilePath = filePathRef.current || '';
-      if (!latestFilePath.startsWith('text://')) return;
-      try {
-        const data = JSON.parse(latestFilePath.substring(7));
-        const oldWords = data.words || [];
-        const newTokens = textToSave.trim().split(/\s+/).filter(Boolean);
-        const finalMerged = newTokens.map((token, i) => {
-          if (oldWords[i]) return { ...oldWords[i], word: token };
-          const lastEnd = oldWords[oldWords.length - 1]?.end ?? 0;
-          return { word: token, start: lastEnd + i * 0.3, end: lastEnd + (i + 1) * 0.3 };
-        });
-        const updated = { ...data, text: textToSave, words: finalMerged };
-        await db.updateAssetFilePath(currentAssetId, `text://${JSON.stringify(updated)}`);
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus('idle'), 2000);
-      } catch (err) {
-        console.error('Failed to save caption text:', err);
-        setSaveStatus('error');
-      }
-    }, 300);
+        try {
+          // Use the safer updateCaptionText which fetches IDs internally in the DB
+          await db.updateCaptionText(Number(currentClipId), JSON.stringify(updatedData));
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus('idle'), 2000);
+        } catch (err) {
+          console.error('Failed to save caption text to DB:', err);
+          setSaveStatus('error');
+        }
+      }, 500); // Slightly longer debounce for stability
+
+    } catch (e) {
+      console.error('Failed to parse current caption data:', e);
+      setSaveStatus('error');
+    }
   };
 
   const wordsDebounceTimerRef = useRef<number | null>(null);
@@ -863,8 +862,9 @@ export function PropertiesPanel({
 
                 <div style={{ opacity: isApplying ? 0.5 : 1, pointerEvents: isApplying ? 'none' : 'auto' }}>
                   <CaptionStyleEditor
+                    clipId={String(selectedClip.id)}
                     currentStyle={localCaptionStyle}
-                    onChange={(newStyle) => {
+                    onChange={(newStyle: any) => {
                       if (isApplying) return;
                       handleCaptionStyleChange(newStyle);
                     }}

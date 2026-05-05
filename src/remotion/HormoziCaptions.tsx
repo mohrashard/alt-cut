@@ -377,14 +377,14 @@ const TextClip: React.FC<{
           // FIX A: Lock transform to ALWAYS perfectly center on the dashed drag box
           transform: 'translate(-50%, -50%)',
           // FIX B: Match the PreviewWindow bounding box exact width
-           width: 'max-content',
+          width: 'max-content',
           maxWidth: '85%',
           // FIX C: Force the inner background box to align based on user's textAlign choice
           display: 'flex',
           flexDirection: 'column',
           alignItems: captionStyle.textAlign === 'left' ? 'flex-start'
             : captionStyle.textAlign === 'right' ? 'flex-end'
-            : 'center',
+              : 'center',
         }}
       >
         {/* 2. BACKGROUND & PADDING LAYER */}

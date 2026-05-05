@@ -588,32 +588,40 @@ export async function splitClip(
   }
 
   const absStartTime = clip.start_time + splitLocalTime;
+  const db_raw = await getDb();
 
-  // Shrink the original clip (Part A)
-  await db.execute(
-    'UPDATE timeline_clips SET end_time=$1 WHERE id=$2',
-    [absStartTime, clipId]
-  );
+  await db_raw.execute('BEGIN TRANSACTION');
+  try {
+    // Shrink the original clip (Part A)
+    await db_raw.execute(
+      'UPDATE timeline_clips SET end_time=$1 WHERE id=$2',
+      [absStartTime, clipId]
+    );
 
-  // Insert Part B immediately after Part A
-  await db.execute(
-    `INSERT INTO timeline_clips
-       (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-    [
-      clip.project_id,
-      clip.asset_id,
-      clip.track_index + 1,
-      (clip as any).track_type || 'video',
-      (clip as any).track_lane || 0,
-      absStartTime,
-      clip.end_time,
-      clip.timeline_start + splitLocalTime,
-      clip.audio_enabled ?? 1,
-      clip.audio_volume ?? 1.0,
-      clip.hidden ?? 0,
-    ]
-  );
+    // Insert Part B immediately after Part A
+    await db_raw.execute(
+      `INSERT INTO timeline_clips
+         (project_id, asset_id, track_index, track_type, track_lane, start_time, end_time, timeline_start, audio_enabled, audio_volume, hidden)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        clip.project_id,
+        clip.asset_id,
+        clip.track_index + 1,
+        (clip as any).track_type || 'video',
+        (clip as any).track_lane || 0,
+        absStartTime,
+        clip.end_time,
+        clip.timeline_start + splitLocalTime,
+        clip.audio_enabled ?? 1,
+        clip.audio_volume ?? 1.0,
+        clip.hidden ?? 0,
+      ]
+    );
+    await db_raw.execute('COMMIT');
+  } catch (err) {
+    await db_raw.execute('ROLLBACK');
+    throw err;
+  }
 }
 
 export async function deleteTimelineClip(clipId: number): Promise<void> {
@@ -648,15 +656,22 @@ export async function clearTextClipsWithinBounds(projectId: number, minStart: nu
 
 export async function updateTimelineOrder(clips: TimelineClip[]): Promise<void> {
   const db = await getDb();
-  let currentStart = 0;
-  for (let i = 0; i < clips.length; i++) {
-    const clip = clips[i];
-    const duration = clip.end_time - clip.start_time;
-    await db.execute(
-      'UPDATE timeline_clips SET track_index=$1, timeline_start=$2 WHERE id=$3',
-      [i, currentStart, clip.id]
-    );
-    currentStart += duration;
+  await db.execute('BEGIN TRANSACTION');
+  try {
+    let currentStart = 0;
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i];
+      const duration = clip.end_time - clip.start_time;
+      await db.execute(
+        'UPDATE timeline_clips SET track_index=$1, timeline_start=$2 WHERE id=$3',
+        [i, currentStart, clip.id]
+      );
+      currentStart += duration;
+    }
+    await db.execute('COMMIT');
+  } catch (err) {
+    await db.execute('ROLLBACK');
+    throw err;
   }
 }
 
@@ -688,23 +703,30 @@ export async function restoreTimelineClips(
   clips: TimelineClip[]
 ): Promise<void> {
   const db = await getDb();
-  await db.execute('DELETE FROM timeline_clips WHERE project_id = $1', [projectId]);
-  for (const clip of clips) {
-    await db.execute(
-      `INSERT OR REPLACE INTO timeline_clips
-         (id, project_id, asset_id, track_index, track_type, track_lane,
-          start_time, end_time, timeline_start, audio_enabled, audio_volume, 
-          hidden, caption_style, effects, scale, audio_separated, paired_audio_clip_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-      [
-        clip.id, clip.project_id, clip.asset_id, clip.track_index,
-        clip.track_type || 'video', clip.track_lane ?? 0,
-        clip.start_time, clip.end_time, clip.timeline_start,
-        clip.audio_enabled ?? 1, clip.audio_volume ?? 1.0, clip.hidden ?? 0,
-        clip.caption_style ?? null, clip.effects ?? '{}', clip.scale ?? 1.0,
-        clip.audio_separated ?? 0, clip.paired_audio_clip_id ?? null
-      ]
-    );
+  await db.execute('BEGIN TRANSACTION');
+  try {
+    await db.execute('DELETE FROM timeline_clips WHERE project_id = $1', [projectId]);
+    for (const clip of clips) {
+      await db.execute(
+        `INSERT OR REPLACE INTO timeline_clips
+           (id, project_id, asset_id, track_index, track_type, track_lane,
+            start_time, end_time, timeline_start, audio_enabled, audio_volume, 
+            hidden, caption_style, effects, scale, audio_separated, paired_audio_clip_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+        [
+          clip.id, clip.project_id, clip.asset_id, clip.track_index,
+          clip.track_type || 'video', clip.track_lane ?? 0,
+          clip.start_time, clip.end_time, clip.timeline_start,
+          clip.audio_enabled ?? 1, clip.audio_volume ?? 1.0, clip.hidden ?? 0,
+          clip.caption_style ?? null, clip.effects ?? '{}', clip.scale ?? 1.0,
+          clip.audio_separated ?? 0, clip.paired_audio_clip_id ?? null
+        ]
+      );
+    }
+    await db.execute('COMMIT');
+  } catch (err) {
+    await db.execute('ROLLBACK');
+    throw err;
   }
 }
 

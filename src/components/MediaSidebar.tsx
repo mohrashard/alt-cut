@@ -14,9 +14,9 @@ interface MediaSidebarProps {
 
 const UploadIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-    <polyline points="17 8 12 3 7 8"/>
-    <line x1="12" y1="3" x2="12" y2="15"/>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
   </svg>
 );
 
@@ -51,7 +51,7 @@ export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded, highlig
   }, []);
 
   useEffect(() => {
-    if (projectId) {
+    if (projectId !== undefined) {
       getProjectAssets(projectId).then(setMediaItems).catch(console.error);
     }
   }, [projectId]);
@@ -67,6 +67,7 @@ export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded, highlig
 
   const handleImport = async () => {
     try {
+      console.log('[MediaSidebar] Import started, projectId:', projectId);
       if (!(window as any).__TAURI_INTERNALS__) {
         alert('Native file picker is only available in the desktop app.');
         return;
@@ -75,27 +76,61 @@ export function MediaSidebar({ projectId, onMediaSelected, onMediaAdded, highlig
         multiple: false,
         filters: [{ name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'avi', 'mp3', 'wav', 'png', 'jpg'] }],
       });
-      if (file && projectId) {
+      console.log('[MediaSidebar] File picker result:', file);
+
+      if (file && projectId !== undefined) {
         const filePath = typeof file === 'string' ? file : (file as any).path || (Array.isArray(file) ? file[0] : null);
+        console.log('[MediaSidebar] Resolved filePath:', filePath);
         if (!filePath) return;
 
         let duration = 0;
         try {
-          const result = await invoke<any>('get_video_duration', { videoPath: filePath });
-          duration = parseFloat(result);
-        } catch {}
+          console.log('[MediaSidebar] Requesting duration for:', filePath);
+          // Add a 1.5s timeout to the duration check so it doesn't hang the UI
+          duration = await Promise.race([
+            invoke<any>('get_video_duration', { videoPath: filePath }).then(r => parseFloat(r)),
+            new Promise<number>((_, reject) => setTimeout(() => reject('timeout'), 1500))
+          ]).catch(err => {
+            console.warn('[MediaSidebar] Duration check failed or timed out:', err);
+            return 0;
+          });
+        } catch (e) {
+          console.warn('[MediaSidebar] Duration check error:', e);
+        }
 
         if (isNaN(duration) || duration <= 0) {
-          try { duration = await getVideoDurationBrowser(convertFileSrc(filePath)); } catch {}
+          try {
+            console.log('[MediaSidebar] Falling back to browser duration check...');
+            duration = await getVideoDurationBrowser(convertFileSrc(filePath));
+          } catch (e) {
+            console.warn('[MediaSidebar] Browser duration check failed:', e);
+          }
         }
         if (isNaN(duration) || duration <= 0) duration = 5.0;
+        console.log('[MediaSidebar] Final duration used:', duration);
 
-        const newAsset = await addAsset(projectId, filePath, 'video', duration);
-        setMediaItems(prev => [newAsset, ...prev]);
+        const ext = filePath.split('.').pop()?.toLowerCase() || '';
+        const isAudio = ['mp3', 'wav', 'aac', 'm4a'].includes(ext);
+        const isImage = ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext);
+        const assetType = isAudio ? 'audio' : isImage ? 'image' : 'video';
+
+        console.log('[MediaSidebar] Calling db.addAsset with type:', assetType);
+        const newAsset = await addAsset(projectId, filePath, assetType, duration);
+        console.log('[MediaSidebar] db.addAsset success:', newAsset);
+
+        // Prevent duplicate items in local state
+        setMediaItems(prev => {
+          if (prev.find(a => a.id === newAsset.id)) {
+            console.log('[MediaSidebar] Asset already in list, skipping state update');
+            return prev;
+          }
+          return [newAsset, ...prev];
+        });
+
         onMediaAdded(filePath);
       }
     } catch (e) {
-      alert(`Import failed: ${e}`);
+      console.error(`[MediaSidebar] Import failed: ${e}`);
     }
   };
 
